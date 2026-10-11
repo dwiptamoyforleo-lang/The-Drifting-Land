@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="skyGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1e1b4b"/>
+      <stop offset="60%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#042f2e"/>
+    </linearGradient>
+    <linearGradient id="islandGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2dd4bf"/>
+      <stop offset="40%" stop-color="#0d9488"/>
+      <stop offset="100%" stop-color="#134e4a"/>
+    </linearGradient>
+    <linearGradient id="threadGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#67e8f9"/>
+      <stop offset="100%" stop-color="#a855f7"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+  <!-- Background -->
+  <rect width="512" height="512" rx="96" fill="url(#skyGrad)"/>
+  
+  <!-- Luminous Ocean horizon -->
+  <ellipse cx="256" cy="450" rx="300" ry="120" fill="#0d9488" opacity="0.3" filter="url(#glow)"/>
+  <ellipse cx="256" cy="480" rx="260" ry="80" fill="#2dd4bf" opacity="0.25"/>
+
+  <!-- Secondary floating island in distance -->
+  <polygon points="120,200 170,185 210,210 180,245 140,240" fill="#1e293b"/>
+  <polygon points="120,200 170,185 210,210" fill="#0f766e"/>
+
+  <!-- Third floating island -->
+  <polygon points="330,170 390,155 420,180 395,215 350,210" fill="#1e293b"/>
+  <polygon points="330,170 390,155 420,180" fill="#0f766e"/>
+
+  <!-- Main Floating Island -->
+  <polygon points="160,320 352,320 390,345 320,430 256,470 190,430 130,345" fill="#1e293b"/>
+  <polygon points="130,345 160,320 352,320 390,345 330,360 256,365 170,360" fill="url(#islandGrad)"/>
+
+  <!-- Ancient Spire / Anchor Pillar -->
+  <polygon points="248,220 264,220 270,320 242,320" fill="#334155"/>
+  <polygon points="256,170 246,220 266,220" fill="#67e8f9" filter="url(#glow)"/>
+  <circle cx="256" cy="160" r="14" fill="#a5f3fc" filter="url(#glow)"/>
+
+  <!-- Glowing Resonance Threads -->
+  <path d="M 170 195 Q 210 260 256 165" stroke="url(#threadGrad)" stroke-width="4" fill="none" filter="url(#glow)"/>
+  <path d="M 370 165 Q 310 240 256 165" stroke="url(#threadGrad)" stroke-width="4" fill="none" filter="url(#glow)"/>
+
+  <!-- Motes of Light -->
+  <circle cx="210" cy="230" r="3" fill="#67e8f9" filter="url(#glow)"/>
+  <circle cx="300" cy="210" r="4" fill="#a5f3fc" filter="url(#glow)"/>
+  <circle cx="275" cy="270" r="2.5" fill="#c084fc" filter="url(#glow)"/>
+  <circle cx="160" cy="300" r="3" fill="#2dd4bf" filter="url(#glow)"/>
+</svg>

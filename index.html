@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en" class="h-full w-full select-none overflow-hidden touch-none" style="background-color: #070b14; color: #f1f5f9;">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>THE DRIFTING LAND</title>
+    <meta name="description" content="A mobile-optimized first-person sci-fi exploration game set across towering citadels above golden clouds and a colossal turquoise gas giant." />
+    <meta property="og:title" content="THE DRIFTING LAND" />
+    <meta property="og:description" content="A mobile-optimized first-person sci-fi exploration game set across towering citadels above golden clouds and a colossal turquoise gas giant." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#0d1b2a" />
+    <link rel="icon" type="image/svg+xml" href="./icon.svg" />
+    <link rel="apple-touch-icon" href="./icon.svg" />
+    <link rel="manifest" href="./manifest.json" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800&family=Share+Tech+Mono&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+      // Ensure trailing slash on subpath URLs (e.g. GitHub Pages) so relative assets resolve correctly
+      if (window.location.pathname && !window.location.pathname.endsWith('/') && !window.location.pathname.includes('.')) {
+        window.location.replace(window.location.pathname + '/' + window.location.search + window.location.hash);
+      }
+    </script>
+    <style>html,body{width:100%;height:100%;margin:0;padding:0;overflow:hidden;color:#f1f5f9!important;background-color:#070b14!important}#initial-shell{text-align:center;z-index:10;background:radial-gradient(circle,#131c2d 0%,#060a12 85%);flex-direction:column;justify-content:center;align-items:center;padding:24px;font-family:Cinzel,serif,sans-serif;display:flex;position:fixed;inset:0}.shell-title{letter-spacing:.22em;color:#f1f5f9;text-shadow:0 0 24px #2dd4bf80;margin-bottom:8px;font-size:32px;font-weight:700}.shell-subtitle{color:#38bdf8;letter-spacing:.12em;text-transform:uppercase;margin-bottom:24px;font-family:Share Tech Mono,monospace,sans-serif;font-size:13px}.shell-spinner{border:3px solid #38bdf833;border-top-color:#38bdf8;border-radius:50%;width:44px;height:44px;animation:.9s linear infinite shellSpin}@keyframes shellSpin{to{transform:rotate(360deg)}}#fallback-diagnostic{color:#94a3b8;background:#0f172ae6;border:1px solid #38bdf84d;border-radius:12px;max-width:380px;margin-top:20px;padding:16px;font-family:Share Tech Mono,monospace;font-size:11px;line-height:1.5;display:none}</style>
+    <script type="module" crossorigin src="./assets/index-Dzh8TYlD.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-CbDgmh6S.css">
+  </head>
+  <body class="h-full w-full bg-[#070b14] text-slate-100 overflow-hidden select-none m-0 p-0 font-['Plus_Jakarta_Sans',sans-serif]" style="background-color: #070b14;">
+    <div id="root" class="h-full w-full">
+      <!-- Initial Loading Shell (Replaced automatically when React mounts) -->
+      <div id="initial-shell">
+        <div class="shell-title">THE DRIFTING LAND</div>
+        <div class="shell-subtitle">CALIBRATING TELEMETRY & DRIVING CITADELS</div>
+        <div class="shell-spinner" id="shell-spinner"></div>
+        <div id="fallback-diagnostic">
+          <p style="color: #38bdf8; font-weight: bold; margin-bottom: 6px;">LOAD DIAGNOSTIC</p>
+          <p id="diag-msg">Initializing 3D WebGL engine...</p>
+          <button onclick="window.location.reload()" style="margin-top: 10px; padding: 6px 14px; background: #0284c7; color: white; border: none; border-radius: 6px; cursor: pointer; font-family: monospace;">Reload Engine</button>
+        </div>
+      </div>
+    </div>
+    <script>
+      // Global error listener to immediately show diagnostics if any script fails
+      window.addEventListener('error', function(e) {
+        var diag = document.getElementById('fallback-diagnostic');
+        var spinner = document.getElementById('shell-spinner');
+        var msg = document.getElementById('diag-msg');
+        if (diag && msg && document.getElementById('initial-shell')) {
+          diag.style.display = 'block';
+          if (spinner) spinner.style.display = 'none';
+          msg.innerHTML = '<span style="color: #f87171; font-weight: bold;">Initialization Note:</span> ' + (e.message || 'Script execution interrupted.') +
+            '<br><br>If deploying to GitHub Pages, ensure repository <b>Settings &gt; Pages &gt; Build and deployment &gt; Source</b> is set to <b>GitHub Actions</b> (or branch <b>gh-pages</b>).';
+        }
+      });
+
+      // Safeguard: If React has not mounted within 4.5 seconds, display diagnostic info
+      setTimeout(function() {
+        var root = document.getElementById('root');
+        var diag = document.getElementById('fallback-diagnostic');
+        var spinner = document.getElementById('shell-spinner');
+        if (root && document.getElementById('initial-shell') && diag) {
+          diag.style.display = 'block';
+          if (spinner) spinner.style.display = 'none';
+          var msg = document.getElementById('diag-msg');
+          if (msg) {
+            msg.innerHTML = "Still loading 3D assets... If deployed on GitHub Pages, verify repository <b>Settings &gt; Pages &gt; Source</b> is set to <b>GitHub Actions</b> so the compiled 3D build is served.";
+          }
+        }
+      }, 4500);
+    </script>
+  </body>
+</html>
+
