@@ -1,28 +1,34 @@
-# The Drifting World (Playable 3D Fantasy Exploration Game)
+# THE DRIFTING LAND (Playable 3D Sci-Fi Exploration Game)
 
-A mobile-optimized, first-person fantasy exploration game built with **Three.js**, **WebGL**, **TypeScript**, and **Tailwind CSS**.
+A mobile-optimized, first-person sci-fi exploration game built with **Three.js**, **WebGL**, **TypeScript**, and **Tailwind CSS**, accurately recreating the visual environment and HUD from the concept artwork.
 
 ---
 
 ## 🌌 Visual Direction & Atmosphere
-- **Luminous Turquoise Ocean**: Vast teal and turquoise ocean plane with real-time procedural wave vertex undulations and caustic reflections.
-- **Floating Island Archipelago**: Low-poly sculpted islands with lush turquoise grass tops, jagged craggy underside rock outcroppings, and suspended crystal stalactites.
-- **Mysterious Distant Striders**: Enormous 4-legged silhouettes towering 80 meters high in the ocean mist, swaying peacefully with the tides.
-- **Ancient Ruins**: Broken monolithic gateway arches, weathered stone pillars, and floating rune rings.
-- **Signature Landmark**: The towering Monolith and the Central Core of the Drifting Citadel.
-- **Atmospheric Palette**: Luminous turquoise `#14b8a6`, deep twilight violet shadows `#1e2238`, and cool cyan celestial lighting.
+- **Colossal Turquoise Gas Giant Planet**: Dominates the upper-right sky with swirling atmospheric bands and a luminous crescent rim glow.
+- **Golden Cloud Sea**: Dense amber/sunset cloud ocean rolling beneath the towering sky citadels.
+- **Industrial Metallic Observation Deck**: High-altitude catwalk with diamond tread steel grating, conduits, and an industrial control console with green CRT terminal displays and keypads.
+- **Hand-Held Brass Field Compass**: A 3D field compass held in the player's gloved hand with a magnetic needle that dynamically rotates to track True North in first-person view.
+- **Sky Citadels & Neon Signage**: Vertical skyscrapers connected by elevated sky-bridges, adorned with glowing magenta, cyan, amber, and green holographic neon signs.
+- **Geodesic Polyhedral Dome**: Futuristic faceted crystal research habitat crowning the right tower.
+- **Aerial Traffic**: Flying speeders cruising along transit corridors with glowing red and cyan thruster light trails.
+- **Authentic Sci-Fi HUD**:
+  - Horizontal scrolling compass tape with degree markings (100° to 240°).
+  - Temperature meter gauge (`18.4°C`).
+  - Elevation meter with glowing diamond milestone indicator (`1,420 m`).
+  - Centered precision crosshair `+`.
 
 ---
 
 ## 🕹️ Controls (First-Person Only)
 
-The camera strictly represents the player's eyes (height 1.65m) with smooth head movement, vertical pitch clamping (-85° to +85°), and no character model visible.
+The camera strictly represents the player's eyes with smooth head movement and vertical pitch clamping.
 
 ### Mobile (Android & iOS)
 - **Movement**: Virtual analog joystick on the bottom-left.
 - **Camera Look**: Touch-and-drag anywhere on the right half of the screen.
 - **Jump**: Dedicated jump button on the bottom-right.
-- **Interact**: Contextual glowing button on the bottom-right that appears and pulses when approaching an ancient anchor, world fragment, or inscription tablet.
+- **Interact**: Glowing contextual button that appears when approaching terminals and beacons.
 - **Pause & Settings**: Top-right corner button.
 - **Archive Journal**: Top-right book button.
 
@@ -35,59 +41,15 @@ The camera strictly represents the player's eyes (height 1.65m) with smooth head
 
 ---
 
-## ⚡ The Signature Thread System
+## 🚀 GitHub Pages Deployment (Fixing Loading Screen Issue)
 
-### 1. Anchor Threads
-Players discover ancient magical anchors situated on each island:
-- **Anchor Alpha (The Dawn Anchor)** on the starting Threshold Island.
-- **Anchor Beta (The Twilight Anchor)** atop the high ruined Spire.
-- **Anchor Gamma (The Meridian Anchor)** inside the circular stone sanctuary.
-
-Attuning an anchor shoots an ethereal beacon upward and creates a glowing energy thread connecting compatible anchors with a pulsing Bezier light beam.
-
-### 2. Resonance Thread
-When all three anchors are tuned in harmonic resonance:
-1. Celestial chime crescendo plays.
-2. The twilight mist temporarily clears with an aurora flare.
-3. The previously hidden **Drifting Citadel** rises from the turquoise ocean depths.
-4. A **Luminous Bridge of Light** materializes, granting physical walking access to the Citadel.
-5. Players can explore the Citadel and collect **The Celestial Heart**.
-
----
-
-## 📱 Mobile Performance Architecture
-- **Adaptive Resolution Capping**:
-  - `Low`: DPR capped at 1.0, minimum effects, high FPS.
-  - `Balanced`: DPR capped at 1.35, smooth lighting and foliage (default for Android).
-  - `High`: DPR up to 1.75 with maximum particles and lighting detail.
-- **Restrained Draw Calls**: Shared low-poly geometries and materials (`MeshLambertMaterial` & `MeshStandardMaterial`).
-- **No Heavy Post-Processing**: Atmospheric depth achieved through lightweight exponential fog (`THREE.FogExp2`).
-- **Procedural Web Audio API Synthesizer**: Complete soundscape (wind, ocean swell, footsteps, jumps, crystal chimes, resonance crescendo) generated in real time without external audio files.
-- **Local Progress Saving**: Discovered anchors, fragments, and resonance achievements persist across browser reloads via `localStorage`.
-
----
-
-## 🚀 GitHub Pages Deployment
-
-The repository is configured for automatic deployment to GitHub Pages at:
-**`https://dwiptamoyforleo-lang.github.io/the-drifting-world/`**
-
-### Automatic Deployment via GitHub Actions
-A production GitHub Actions workflow is provided at `.github/workflows/deploy.yml`.
-
-1. Push this repository to GitHub:
-   ```bash
-   git init
-   git add .
-   git commit -m "Initialize The Drifting World with GitHub Pages workflow"
-   git remote add origin https://github.com/dwiptamoyforleo-lang/the-drifting-world.git
-   git branch -M main
-   git push -u origin main
-   ```
-2. In your GitHub repository:
-   - Navigate to **Settings > Pages**
-   - Under **Build and deployment > Source**, select **GitHub Actions**
-3. Once selected, pushing to `main` automatically builds with `base: '/the-drifting-world/'`, generates the `dist/` directory, and publishes the live game.
+### Why It Was Stuck on a Loading Screen Previously:
+1. **Repository Name & Subpath Mismatches**: Hardcoded base paths (like `/the-drifting-world/`) cause HTTP 404 errors if the repository is named differently (e.g. `the-drifting-land` or capitalized). A 404 on the JavaScript asset prevented the app from executing, leaving the initial loading shell frozen forever.
+2. **Relative Path Fix**: The build is now configured with relative base paths (`base: './'`), guaranteeing that JavaScript and CSS files resolve correctly regardless of repository name, account name, custom domain, or folder hierarchy.
+3. **Deployment Mode**: GitHub Pages must be configured to build from **GitHub Actions**:
+   - In your repository, go to **Settings > Pages**.
+   - Under **Build and deployment > Source**, choose **GitHub Actions**.
+   - The included workflow `.github/workflows/deploy.yml` will automatically build the project and deploy the contents of `dist/` on every push to `main`.
 
 ---
 

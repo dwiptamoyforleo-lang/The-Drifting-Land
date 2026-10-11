@@ -4,6 +4,7 @@ import { GameProgress } from '../game/types';
 
 interface TitleScreenProps {
   onStartGame: () => void;
+  onOpenSectorSelect: () => void;
   onOpenSettings: () => void;
   onOpenJournal: () => void;
   onResetProgress: () => void;
@@ -12,6 +13,7 @@ interface TitleScreenProps {
 
 export const TitleScreen: React.FC<TitleScreenProps> = ({
   onStartGame,
+  onOpenSectorSelect,
   onOpenSettings,
   onOpenJournal,
   onResetProgress,
@@ -32,12 +34,12 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
           <span>First-Person Exploration</span>
         </div>
 
-        <h1 className="font-fantasy text-4xl sm:text-6xl md:text-7xl font-bold tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-teal-200 via-cyan-100 to-indigo-200 drop-shadow-[0_2px_18px_rgba(45,212,191,0.35)]">
-          THE DRIFTING WORLD
+        <h1 className="font-['Cinzel'] text-4xl sm:text-6xl md:text-7xl font-bold tracking-[0.22em] text-transparent bg-clip-text bg-gradient-to-r from-cyan-200 via-white to-amber-200 drop-shadow-[0_2px_22px_rgba(6,182,212,0.5)]">
+          THE DRIFTING LAND
         </h1>
 
-        <p className="mt-4 text-sm sm:text-base md:text-lg text-slate-300/90 font-light italic tracking-wide max-w-md mx-auto">
-          &ldquo;An ocean of islands. A world held together by threads.&rdquo;
+        <p className="mt-4 text-sm sm:text-base md:text-lg text-slate-300 font-light tracking-[0.15em] uppercase max-w-md mx-auto">
+          Explore the Drifting Lands
         </p>
 
         {hasProgress && (
@@ -50,18 +52,26 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
       </div>
 
       {/* Actions */}
-      <div className="w-full max-w-sm mx-auto flex flex-col gap-3.5 my-auto py-6 z-10">
+      <div className="w-full max-w-sm mx-auto flex flex-col gap-3.5 my-auto py-6 z-10 font-['Share_Tech_Mono',monospace]">
         <button
           onClick={onStartGame}
-          className="group relative flex items-center justify-center gap-3 w-full py-4 px-6 rounded-xl bg-gradient-to-r from-teal-600 to-cyan-600 hover:from-teal-500 hover:to-cyan-500 active:scale-[0.98] text-white font-medium text-lg tracking-wider uppercase shadow-[0_0_28px_rgba(20,184,166,0.45)] transition-all duration-200 border border-teal-300/40 cursor-pointer"
+          className="group relative flex items-center justify-center gap-3 w-full py-4 px-6 rounded-xl bg-gradient-to-r from-cyan-600 to-teal-500 hover:from-cyan-500 hover:to-teal-400 active:scale-[0.98] text-white font-medium text-lg tracking-wider uppercase shadow-[0_0_28px_rgba(6,182,212,0.45)] transition-all duration-200 border border-cyan-300/40 cursor-pointer font-['Cinzel']"
         >
           <Play className="w-5 h-5 fill-current transition-transform group-hover:scale-110" />
           <span>{hasProgress ? 'Continue Exploration' : 'Begin Exploration'}</span>
         </button>
 
         <button
+          onClick={onOpenSectorSelect}
+          className="flex items-center justify-center gap-2.5 w-full py-3.5 px-5 rounded-xl bg-cyan-950/60 hover:bg-cyan-900/60 active:scale-[0.98] text-cyan-200 text-sm tracking-wide border border-cyan-500/40 backdrop-blur-md transition-all cursor-pointer shadow-lg shadow-cyan-950/40"
+        >
+          <Compass className="w-4 h-4 text-cyan-400" />
+          <span>Select Sector & Pilot Profile</span>
+        </button>
+
+        <button
           onClick={onOpenSettings}
-          className="flex items-center justify-center gap-2.5 w-full py-3.5 px-5 rounded-xl bg-slate-900/70 hover:bg-slate-800/80 active:scale-[0.98] text-slate-200 text-sm tracking-wide border border-slate-700/60 backdrop-blur-md transition-all cursor-pointer"
+          className="flex items-center justify-center gap-2.5 w-full py-3 px-5 rounded-xl bg-slate-900/70 hover:bg-slate-800/80 active:scale-[0.98] text-slate-200 text-xs tracking-wide border border-slate-700/60 backdrop-blur-md transition-all cursor-pointer"
         >
           <Settings className="w-4 h-4 text-slate-400" />
           <span>Graphics & Settings</span>

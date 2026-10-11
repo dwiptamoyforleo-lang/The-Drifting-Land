@@ -1,10 +1,19 @@
 /**
  * Local progress persistence for The Drifting World
  */
-import { GameProgress, GameSettings } from './types';
+import { GameProgress, GameSettings, UserProfile } from './types';
 
 const STORAGE_KEY_PROGRESS = 'the_drifting_world_progress_v1';
 const STORAGE_KEY_SETTINGS = 'the_drifting_world_settings_v1';
+const STORAGE_KEY_PROFILE = 'the_drifting_world_profile_v1';
+
+export const DEFAULT_USER_PROFILE: UserProfile = {
+  username: 'Aero_Vanguard',
+  xp: 1850,
+  level: 4,
+  selectedSector: 1,
+  unlockedSectors: [1, 2, 3],
+};
 
 export const DEFAULT_SETTINGS: GameSettings = {
   graphicsQuality: 'balanced',
@@ -70,4 +79,24 @@ export function clearProgress(): GameProgress {
     // ignore
   }
   return { ...INITIAL_PROGRESS };
+}
+
+export function loadUserProfile(): UserProfile {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_PROFILE);
+    if (raw) {
+      return { ...DEFAULT_USER_PROFILE, ...JSON.parse(raw) };
+    }
+  } catch {
+    // ignore
+  }
+  return { ...DEFAULT_USER_PROFILE };
+}
+
+export function saveUserProfile(profile: UserProfile) {
+  try {
+    localStorage.setItem(STORAGE_KEY_PROFILE, JSON.stringify(profile));
+  } catch {
+    // ignore
+  }
 }

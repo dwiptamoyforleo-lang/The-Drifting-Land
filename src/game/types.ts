@@ -63,6 +63,30 @@ export interface GameProgress {
   lastCheckpoint: [number, number, number];
 }
 
+export interface TelemetryData {
+  headingDegrees: number;
+  temperatureCelsius: number;
+  elevationMeters: number;
+}
+
+export interface UserProfile {
+  username: string;
+  xp: number;
+  level: number;
+  selectedSector: number;
+  unlockedSectors: number[];
+}
+
+export interface SectorInfo {
+  id: number;
+  name: string;
+  subtitle: string;
+  description: string;
+  altitudeMeters: number;
+  difficulty: 'Standard' | 'Advanced' | 'Extreme';
+  spawnPoint: [number, number, number];
+}
+
 export interface PerformanceStats {
   fps: number;
   drawCalls: number;

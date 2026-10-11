@@ -4,9 +4,8 @@ import path from 'path';
 import {defineConfig} from 'vite';
 
 export default defineConfig(({ command }) => {
-  // Configured for GitHub Pages repository: dwiptamoyforleo-lang/the-drifting-world
-  // In production build, base is '/the-drifting-world/'. In dev server, defaults to '/' for local preview.
-  const base = process.env.BASE_PATH || (command === 'build' ? '/the-drifting-world/' : '/');
+  // Use relative base './' so all assets load correctly on ANY GitHub Pages repo name, custom domain, or subpath
+  const base = process.env.BASE_PATH || './';
 
   return {
     base,

@@ -1,12 +1,14 @@
 /**
- * World and Environment builder for The Drifting World.
- * Features:
- * - Luminous turquoise and teal ocean
- * - Floating islands with rocky undersides & turquoise grass surfaces
- * - Ancient stone ruins, arches, and ruined towers
- * - Mysterious distant long-legged silhouettes (striders)
- * - Stylized fantasy flora, glowing mushrooms, crystals, and trees
- * - Sky dome, distant floating rock formations and atmospheric fog
+ * The Drifting Land — World & Sci-Fi Megacity Environment
+ * Accurately matches image_a02531e0.jpg:
+ * - Colossal Turquoise Gas Giant Planet in the upper right sky with glowing crescent
+ * - Golden / amber sunset cloud sea rolling beneath the sky citadels
+ * - Industrial metallic observation deck with control console, monitors, keypads, and conduit pipes
+ * - Towering sci-fi megacity citadels with glowing neon signs (cyan, magenta, amber, green alien glyphs)
+ * - Elevated walkable sky-bridges connecting the massive towers
+ * - Distinctive geodesic polyhedral dome habitat on the right tower
+ * - Flying aerial speeders cruising between towers with red and cyan thruster trails
+ * - Highly optimized low-poly geometry & shared materials for 60 FPS on Android
  */
 import * as THREE from 'three';
 import { MagicalAnchor, WorldFragment, InscriptionLore } from './types';
@@ -21,29 +23,21 @@ export class WorldManager {
   public fragments: WorldFragment[] = [];
   public inscriptions: InscriptionLore[] = [];
 
-  // Special structures
-  public oceanMesh!: THREE.Mesh;
-  public citadelGroup!: THREE.Group;
-  public citadelBridge!: THREE.Group;
-  public isCitadelRevealed: boolean = false;
-  private citadelTargetY: number = 7.0;
-  private citadelTargetZ: number = -65.0;
+  // Flying speeders
+  public speeders: THREE.Group[] = [];
 
-  // Striders
-  public striders: THREE.Group[] = [];
-
-  // Motes particle system
-  private motesSystem!: THREE.Points;
-
-  // Shared low-poly materials for optimal mobile batching & performance
-  private matGrass!: THREE.MeshLambertMaterial;
-  private matRock!: THREE.MeshLambertMaterial;
-  private matAncientStone!: THREE.MeshLambertMaterial;
-  private matRuinPillar!: THREE.MeshLambertMaterial;
-  private matCrystalCyan!: THREE.MeshStandardMaterial;
-  private matWood!: THREE.MeshLambertMaterial;
-  private matFoliageTeal!: THREE.MeshLambertMaterial;
-  private matFoliageViolet!: THREE.MeshLambertMaterial;
+  // Shared low-poly materials for maximum mobile performance
+  private matSteelDark!: THREE.MeshStandardMaterial;
+  private matSteelPanel!: THREE.MeshLambertMaterial;
+  private matSteelGrate!: THREE.MeshLambertMaterial;
+  private matBrassPipes!: THREE.MeshStandardMaterial;
+  private matNeonCyan!: THREE.MeshBasicMaterial;
+  private matNeonMagenta!: THREE.MeshBasicMaterial;
+  private matNeonAmber!: THREE.MeshBasicMaterial;
+  private matNeonGreen!: THREE.MeshBasicMaterial;
+  private matScreenGlow!: THREE.MeshBasicMaterial;
+  private matDomeGlass!: THREE.MeshStandardMaterial;
+  private matGasGiant!: THREE.MeshStandardMaterial;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -51,399 +45,548 @@ export class WorldManager {
   }
 
   private initMaterials() {
-    // Turquoise & teal vibrant fantasy grass surface
-    this.matGrass = new THREE.MeshLambertMaterial({
-      color: 0x14b8a6, // rich teal-turquoise
+    this.matSteelDark = new THREE.MeshStandardMaterial({
+      color: 0x181c24, // dark industrial steel
+      roughness: 0.4,
+      metalness: 0.6,
       flatShading: true,
     });
 
-    // Dark craggy violet/slate underside of floating islands
-    this.matRock = new THREE.MeshLambertMaterial({
-      color: 0x1e2238, // deep violet-charcoal rock
+    this.matSteelPanel = new THREE.MeshLambertMaterial({
+      color: 0x222933,
       flatShading: true,
     });
 
-    // Ancient weathered stone
-    this.matAncientStone = new THREE.MeshLambertMaterial({
-      color: 0x334155, // slate-500
+    this.matSteelGrate = new THREE.MeshLambertMaterial({
+      color: 0x2e3642,
       flatShading: true,
     });
 
-    this.matRuinPillar = new THREE.MeshLambertMaterial({
-      color: 0x475569,
-      flatShading: true,
+    this.matBrassPipes = new THREE.MeshStandardMaterial({
+      color: 0xd97706, // copper/brass conduit pipes
+      roughness: 0.3,
+      metalness: 0.8,
     });
 
-    // Luminous glowing crystals
-    this.matCrystalCyan = new THREE.MeshStandardMaterial({
-      color: 0x22d3ee,
-      emissive: 0x06b6d4,
-      emissiveIntensity: 0.8,
+    // Vibrant holographic neon materials (matching image signs!)
+    this.matNeonCyan = new THREE.MeshBasicMaterial({ color: 0x00f0c0 });
+    this.matNeonMagenta = new THREE.MeshBasicMaterial({ color: 0xf43f5e });
+    this.matNeonAmber = new THREE.MeshBasicMaterial({ color: 0xf59e0b });
+    this.matNeonGreen = new THREE.MeshBasicMaterial({ color: 0x10b981 });
+
+    this.matScreenGlow = new THREE.MeshBasicMaterial({ color: 0x34d399 });
+
+    this.matDomeGlass = new THREE.MeshStandardMaterial({
+      color: 0x67e8f9,
+      emissive: 0x0891b2,
+      emissiveIntensity: 0.4,
       roughness: 0.2,
+      metalness: 0.2,
+      flatShading: true,
+    });
+
+    this.matGasGiant = new THREE.MeshStandardMaterial({
+      color: 0x06b6d4, // vibrant turquoise/aquamarine
+      emissive: 0x083344,
+      emissiveIntensity: 0.3,
+      roughness: 0.6,
       metalness: 0.1,
-      flatShading: true,
-    });
-
-    // Fantasy flora
-    this.matWood = new THREE.MeshLambertMaterial({
-      color: 0x242436,
-      flatShading: true,
-    });
-
-    this.matFoliageTeal = new THREE.MeshLambertMaterial({
-      color: 0x0d9488,
-      flatShading: true,
-    });
-
-    this.matFoliageViolet = new THREE.MeshLambertMaterial({
-      color: 0x7c3aed,
-      flatShading: true,
     });
   }
 
   public buildWorld() {
     this.setupLighting();
-    this.buildSkyAndAtmosphere();
-    this.buildLuminousOcean();
-    this.buildDistantScenery();
-    this.buildDistantStriders();
-
-    // Islands
-    this.buildStartingIsland();       // Threshold Island
-    this.buildSteppingStones();       // Bridge between islands
-    this.buildSecondIsland();         // Twilight Spire Island
-    this.buildThirdIsland();          // Meridian Sanctum Island
-    this.buildHiddenResonanceCitadel(); // Revealed on resonance
-
-    this.buildAtmosphericMotes();
+    this.buildSkyAndGasGiant();
+    this.buildGoldenCloudSea();
+    this.buildForegroundObservationDeck();
+    this.buildIndustrialConsole();
+    this.buildSkyCitadels();
+    this.buildSkyBridges();
+    this.buildGeodesicDomes();
+    this.buildAerialSpeeders();
+    this.buildQuantumAnchors();
   }
 
   private setupLighting() {
-    // Atmospheric indigo ambient light for deep shadows
-    const ambientLight = new THREE.AmbientLight(0x2d2b55, 1.2);
+    // Ambient cosmic twilight light
+    const ambientLight = new THREE.AmbientLight(0x232938, 1.5);
     this.scene.add(ambientLight);
 
-    // Pale cyan/turquoise directional sunlight
-    const dirLight = new THREE.DirectionalLight(0xa5f3fc, 1.6);
-    dirLight.position.set(60, 100, 40);
-    this.scene.add(dirLight);
+    // Warm golden sunset rim light from the low horizon clouds
+    const sunsetLight = new THREE.DirectionalLight(0xf59e0b, 1.6);
+    sunsetLight.position.set(-60, 20, -50);
+    this.scene.add(sunsetLight);
 
-    // Subtle violet rim light from below/behind for surreal mood
-    const rimLight = new THREE.DirectionalLight(0x6366f1, 0.6);
-    rimLight.position.set(-60, -20, -50);
-    this.scene.add(rimLight);
+    // Cool turquoise reflected light from the giant planet
+    const planetLight = new THREE.DirectionalLight(0x38bdf8, 1.2);
+    planetLight.position.set(70, 80, -90);
+    this.scene.add(planetLight);
   }
 
-  private buildSkyAndAtmosphere() {
-    // Fog color matches the horizon of the reference image: deep twilight teal-navy
-    this.scene.fog = new THREE.FogExp2(0x0a1626, 0.0075);
-    this.scene.background = new THREE.Color(0x0a1626);
+  /**
+   * 1. Sky & Celestial Gas Giant:
+   * Colossal turquoise gas giant planet dominating the upper-right sky!
+   */
+  private buildSkyAndGasGiant() {
+    // Atmospheric fog: Golden/amber cloud sea fading into deep cosmic indigo
+    const fogColor = new THREE.Color(0x543216);
+    this.scene.fog = new THREE.FogExp2(fogColor.getHex(), 0.0055);
+    this.scene.background = new THREE.Color(0x0a101d);
 
-    // Large Sky Dome with soft gradient simulation
-    const skyGeo = new THREE.SphereGeometry(600, 24, 16);
+    // Deep space celestial sky dome
+    const skyGeo = new THREE.SphereGeometry(750, 24, 16);
     const skyMat = new THREE.MeshBasicMaterial({
-      color: 0x0f1c30,
+      color: 0x080e1a,
       side: THREE.BackSide,
     });
-    const skyMesh = new THREE.Mesh(skyGeo, skyMat);
-    this.scene.add(skyMesh);
+    this.scene.add(new THREE.Mesh(skyGeo, skyMat));
 
-    // Distant floating rock monoliths suspended in the clouds
-    const monolithGeo = new THREE.ConeGeometry(8, 26, 5);
-    for (let i = 0; i < 14; i++) {
-      const angle = (i / 14) * Math.PI * 2 + Math.random() * 0.4;
-      const dist = 220 + Math.random() * 150;
-      const monolith = new THREE.Mesh(monolithGeo, this.matRock);
-      monolith.rotation.x = Math.PI; // pointing down
-      monolith.position.set(
-        Math.cos(angle) * dist,
-        40 + Math.sin(i * 1.5) * 35,
-        Math.sin(angle) * dist
-      );
-      monolith.scale.set(1.5 + Math.random(), 1.5 + Math.random(), 1.5 + Math.random());
-      this.scene.add(monolith);
+    // COLOSSAL TURQUOISE GAS GIANT PLANET (Upper-right sky from screenshot!)
+    const planetGroup = new THREE.Group();
+    planetGroup.position.set(95, 75, -170);
 
-      // Add gentle bobbing animation to floating monoliths
-      const origY = monolith.position.y;
-      const speed = 0.4 + Math.random() * 0.3;
-      const phase = Math.random() * Math.PI * 2;
-      this.animatables.push({
-        update: (time) => {
-          monolith.position.y = origY + Math.sin(time * speed + phase) * 2.0;
-        }
-      });
-    }
-  }
+    const planetGeo = new THREE.SphereGeometry(72, 32, 24);
+    const planetMesh = new THREE.Mesh(planetGeo, this.matGasGiant);
+    planetGroup.add(planetMesh);
 
-  private buildLuminousOcean() {
-    // Vast luminous ocean plane with vertex ripple animation
-    const oceanGeo = new THREE.PlaneGeometry(900, 900, 48, 48);
-    oceanGeo.rotateX(-Math.PI / 2);
-
-    const oceanMat = new THREE.MeshStandardMaterial({
-      color: 0x0d9488,       // luminous teal
-      emissive: 0x042f2e,    // deep sea glow
-      emissiveIntensity: 0.5,
-      roughness: 0.1,
-      metalness: 0.2,
-      flatShading: true,
+    // Atmospheric Band Rings on the Gas Giant
+    const bandGeo = new THREE.RingGeometry(73, 76, 32);
+    const bandMat = new THREE.MeshBasicMaterial({
+      color: 0x67e8f9,
+      transparent: true,
+      opacity: 0.35,
+      side: THREE.DoubleSide,
     });
+    const band = new THREE.Mesh(bandGeo, bandMat);
+    band.rotation.x = Math.PI / 3;
+    planetGroup.add(band);
 
-    this.oceanMesh = new THREE.Mesh(oceanGeo, oceanMat);
-    this.oceanMesh.position.y = -11.0;
-    this.scene.add(this.oceanMesh);
+    // Glowing crescent rim
+    const crescentGeo = new THREE.RingGeometry(72, 79, 32);
+    const crescentMat = new THREE.MeshBasicMaterial({
+      color: 0xa5f3fc,
+      transparent: true,
+      opacity: 0.45,
+      side: THREE.DoubleSide,
+    });
+    const crescent = new THREE.Mesh(crescentGeo, crescentMat);
+    crescent.position.z = 2;
+    planetGroup.add(crescent);
 
-    // Store original vertex Y for wave animation
-    const posAttr = oceanGeo.attributes.position;
-    const initialPositions = posAttr.array.slice() as Float32Array;
+    this.scene.add(planetGroup);
 
+    // Slow planetary rotation
     this.animatables.push({
       update: (time) => {
-        const positions = posAttr.array as Float32Array;
-        for (let i = 0; i < positions.length; i += 3) {
-          const x = initialPositions[i];
-          const z = initialPositions[i + 2];
-          // Gentle undulating waves
-          positions[i + 1] = initialPositions[i + 1] +
-            Math.sin(x * 0.03 + time * 1.2) * 0.4 +
-            Math.cos(z * 0.04 + time * 0.9) * 0.4;
-        }
-        posAttr.needsUpdate = true;
+        planetMesh.rotation.y = time * 0.02;
       }
     });
   }
 
   /**
-   * Distant Striders / Colossi:
-   * Strange, enormous, long-legged silhouettes standing in the distant ocean mist.
-   * Matches the mysterious surreal figures in the visual reference!
+   * 2. Golden / Amber Cloud Sea:
+   * Volumetric-looking rolling sunset clouds below the citadels!
    */
-  private buildDistantStriders() {
-    const createStrider = (x: number, z: number, scale: number, rotation: number) => {
-      const striderGroup = new THREE.Group();
-      striderGroup.position.set(x, -11, z);
-      striderGroup.rotation.y = rotation;
-      striderGroup.scale.setScalar(scale);
+  private buildGoldenCloudSea() {
+    const cloudGroup = new THREE.Group();
+    cloudGroup.position.set(0, -14, -60);
 
-      // Dark silhouette material with slight fog-matching tint
-      const matStrider = new THREE.MeshBasicMaterial({
-        color: 0x111c2e,
-      });
+    const cloudMoundGeo = new THREE.DodecahedronGeometry(18, 1);
+    const cloudMat = new THREE.MeshLambertMaterial({
+      color: 0xb45309, // warm golden amber
+      flatShading: true,
+      transparent: true,
+      opacity: 0.85,
+    });
 
-      // Small towering body pod at the top (65m high)
-      const bodyGeo = new THREE.ConeGeometry(3, 8, 5);
-      const bodyMesh = new THREE.Mesh(bodyGeo, matStrider);
-      bodyMesh.position.y = 65;
-      bodyMesh.rotation.x = Math.PI * 0.1;
-      striderGroup.add(bodyMesh);
+    for (let i = 0; i < 28; i++) {
+      const mound = new THREE.Mesh(cloudMoundGeo, cloudMat);
+      const angle = (i / 28) * Math.PI * 2;
+      const dist = 30 + (i % 5) * 18;
+      mound.position.set(
+        Math.cos(angle) * dist,
+        (Math.sin(i * 1.5) * 6),
+        Math.sin(angle) * dist - 20
+      );
+      mound.scale.set(1.6, 0.7, 1.6);
+      cloudGroup.add(mound);
 
-      // Glowing mystical eye / sigil in the head
-      const eyeGeo = new THREE.SphereGeometry(0.8, 6, 6);
-      const eyeMat = new THREE.MeshBasicMaterial({ color: 0x5eead4 });
-      const eyeMesh = new THREE.Mesh(eyeGeo, eyeMat);
-      eyeMesh.position.set(0, 68, 1.8);
-      striderGroup.add(eyeMesh);
-
-      // Four ultra-long spindly stilt legs extending into the ocean
-      const legGeo = new THREE.CylinderGeometry(0.3, 0.7, 66, 4);
-      const legPositions = [
-        { x: -5, z: -5, rx: -0.15, rz: -0.12 },
-        { x: 5, z: -5, rx: -0.15, rz: 0.12 },
-        { x: -6, z: 6, rx: 0.15, rz: -0.14 },
-        { x: 6, z: 6, rx: 0.15, rz: 0.14 },
-      ];
-
-      legPositions.forEach((pos) => {
-        const leg = new THREE.Mesh(legGeo, matStrider);
-        leg.position.set(pos.x, 33, pos.z);
-        leg.rotation.x = pos.rx;
-        leg.rotation.z = pos.rz;
-        striderGroup.add(leg);
-      });
-
-      this.scene.add(striderGroup);
-      this.striders.push(striderGroup);
-
-      // Subtle slow swaying animation
-      const swaySpeed = 0.35 + Math.random() * 0.15;
-      const swayPhase = Math.random() * Math.PI * 2;
+      const origY = mound.position.y;
       this.animatables.push({
         update: (time) => {
-          bodyMesh.rotation.z = Math.sin(time * swaySpeed + swayPhase) * 0.05;
-          bodyMesh.rotation.x = Math.PI * 0.1 + Math.cos(time * swaySpeed * 0.8) * 0.03;
+          mound.position.y = origY + Math.sin(time * 0.4 + i) * 1.5;
+        }
+      });
+    }
+
+    this.scene.add(cloudGroup);
+  }
+
+  /**
+   * 3. Foreground Metallic Observation Deck / Catwalk:
+   * Where the player stands, overlooking the megacity!
+   */
+  private buildForegroundObservationDeck() {
+    const deckGroup = new THREE.Group();
+    deckGroup.position.set(0, 3.8, 0);
+
+    // Deck Walkway Platform (Walkable)
+    const floorGeo = new THREE.BoxGeometry(16, 0.8, 14);
+    const floor = new THREE.Mesh(floorGeo, this.matSteelGrate);
+    deckGroup.add(floor);
+    this.walkableMeshes.push(floor);
+
+    // Tread panel borders
+    const borderGeo = new THREE.BoxGeometry(16.4, 0.9, 0.6);
+    const frontBorder = new THREE.Mesh(borderGeo, this.matSteelDark);
+    frontBorder.position.set(0, 0.1, -6.8);
+    deckGroup.add(frontBorder);
+
+    // Handrails on left, right, and front edge
+    const railPostGeo = new THREE.CylinderGeometry(0.06, 0.06, 1.4, 6);
+    const railBarGeo = new THREE.BoxGeometry(16, 0.08, 0.08);
+
+    const railTop = new THREE.Mesh(railBarGeo, this.matSteelDark);
+    railTop.position.set(0, 1.2, -6.8);
+    deckGroup.add(railTop);
+
+    for (let p = -7; p <= 7; p += 2.5) {
+      const post = new THREE.Mesh(railPostGeo, this.matSteelDark);
+      post.position.set(p, 0.6, -6.8);
+      deckGroup.add(post);
+    }
+
+    this.scene.add(deckGroup);
+  }
+
+  /**
+   * 4. Industrial Control Console on the Railing (Matching Screenshot Bottom-Left!):
+   * Dual CRT/LED screens, keypads, yellow/red buttons, copper conduit pipes!
+   */
+  private buildIndustrialConsole() {
+    const consoleGroup = new THREE.Group();
+    consoleGroup.position.set(-2.5, 4.2, -5.6);
+    consoleGroup.rotation.x = -0.35; // angled control desk
+
+    // Slanted Console Desk Body
+    const deskGeo = new THREE.BoxGeometry(3.6, 1.2, 0.9);
+    const desk = new THREE.Mesh(deskGeo, this.matSteelDark);
+    consoleGroup.add(desk);
+
+    // Left Green Terminal Screen (Glowing wave/text readout)
+    const screenGeo = new THREE.PlaneGeometry(1.2, 0.65);
+    const leftScreen = new THREE.Mesh(screenGeo, this.matScreenGlow);
+    leftScreen.position.set(-0.9, 0.05, 0.46);
+    consoleGroup.add(leftScreen);
+
+    // Right Secondary Display Screen
+    const rightScreenGeo = new THREE.PlaneGeometry(0.9, 0.45);
+    const rightScreen = new THREE.Mesh(rightScreenGeo, this.matScreenGlow);
+    rightScreen.position.set(0.6, 0.15, 0.46);
+    consoleGroup.add(rightScreen);
+
+    // Keypad Button Array (Yellow, Red, Grey buttons)
+    const btnGeo = new THREE.BoxGeometry(0.12, 0.12, 0.06);
+    const btnYellowMat = new THREE.MeshBasicMaterial({ color: 0xfacc15 });
+    const btnRedMat = new THREE.MeshBasicMaterial({ color: 0xef4444 });
+    const btnGreyMat = new THREE.MeshBasicMaterial({ color: 0x64748b });
+
+    for (let r = 0; r < 2; r++) {
+      for (let c = 0; c < 4; c++) {
+        const mat = (r === 0 && c === 0) ? btnYellowMat : (c === 3 ? btnRedMat : btnGreyMat);
+        const btn = new THREE.Mesh(btnGeo, mat);
+        btn.position.set(0.2 + c * 0.2, -0.2 - r * 0.18, 0.48);
+        consoleGroup.add(btn);
+      }
+    }
+
+    // Exposed Copper / Brass Conduit Pipes running along the console (matching image!)
+    const pipeGeo = new THREE.CylinderGeometry(0.04, 0.04, 3.2, 8);
+    pipeGeo.rotateZ(Math.PI / 2);
+    const pipe1 = new THREE.Mesh(pipeGeo, this.matBrassPipes);
+    pipe1.position.set(0, -0.45, 0.42);
+    consoleGroup.add(pipe1);
+
+    const pipe2 = new THREE.Mesh(pipeGeo, this.matBrassPipes);
+    pipe2.position.set(0, -0.55, 0.42);
+    consoleGroup.add(pipe2);
+
+    this.scene.add(consoleGroup);
+  }
+
+  /**
+   * 5. The Sky Citadels & Vertical Megastructures with Glowing Neon Signs:
+   * Matching the iconic towers, signs, and Japanese/alien glyphs from the image!
+   */
+  private buildSkyCitadels() {
+    // A. Left Tower (With multiple glowing vertical neon signs!)
+    const leftTowerGroup = new THREE.Group();
+    leftTowerGroup.position.set(-22, -10, -28);
+
+    const leftTowerGeo = new THREE.BoxGeometry(14, 110, 16);
+    const leftTower = new THREE.Mesh(leftTowerGeo, this.matSteelDark);
+    leftTower.position.y = 45;
+    leftTowerGroup.add(leftTower);
+
+    // Glowing Neon Signs on Left Tower (Matching image!)
+    // 1. Magenta Alien Glyph Sign: [サヨナラ]
+    const signMagenta = new THREE.Mesh(
+      new THREE.BoxGeometry(4.2, 1.4, 0.2),
+      this.matNeonMagenta
+    );
+    signMagenta.position.set(6.8, 48, 2);
+    signMagenta.rotation.y = Math.PI / 2;
+    leftTowerGroup.add(signMagenta);
+
+    // 2. Cyan Vertical Neon Strip Sign
+    const signCyan = new THREE.Mesh(
+      new THREE.BoxGeometry(1.2, 8.5, 0.2),
+      this.matNeonCyan
+    );
+    signCyan.position.set(6.8, 38, 5);
+    signCyan.rotation.y = Math.PI / 2;
+    leftTowerGroup.add(signCyan);
+
+    // 3. Amber Neon Sign
+    const signAmber = new THREE.Mesh(
+      new THREE.BoxGeometry(3.6, 1.2, 0.2),
+      this.matNeonAmber
+    );
+    signAmber.position.set(6.8, 30, -2);
+    signAmber.rotation.y = Math.PI / 2;
+    leftTowerGroup.add(signAmber);
+
+    // 4. Green Neon Sign
+    const signGreen = new THREE.Mesh(
+      new THREE.BoxGeometry(1.2, 7.0, 0.2),
+      this.matNeonGreen
+    );
+    signGreen.position.set(6.8, 60, -4);
+    signGreen.rotation.y = Math.PI / 2;
+    leftTowerGroup.add(signGreen);
+
+    this.scene.add(leftTowerGroup);
+
+    // B. Center Megacity Spire (Giant central skyscraper with sky-bridge connections)
+    const centerTowerGroup = new THREE.Group();
+    centerTowerGroup.position.set(4, -10, -65);
+
+    const centerColGeo = new THREE.CylinderGeometry(10, 14, 130, 8);
+    const centerCol = new THREE.Mesh(centerColGeo, this.matSteelDark);
+    centerCol.position.y = 55;
+    centerTowerGroup.add(centerCol);
+
+    // Upper Antenna Gantry
+    const antennaGeo = new THREE.CylinderGeometry(0.4, 0.8, 32, 6);
+    const antenna = new THREE.Mesh(antennaGeo, this.matSteelPanel);
+    antenna.position.set(0, 135, 0);
+    centerTowerGroup.add(antenna);
+
+    // Cyan beacon at top of antenna
+    const topLight = new THREE.PointLight(0x00f0c0, 2.5, 45);
+    topLight.position.set(0, 150, 0);
+    centerTowerGroup.add(topLight);
+
+    this.scene.add(centerTowerGroup);
+
+    // C. Right Towers (With Geodesic Dome on top!)
+    const rightTowerGroup = new THREE.Group();
+    rightTowerGroup.position.set(32, -10, -38);
+
+    const rightTowerGeo = new THREE.BoxGeometry(18, 95, 20);
+    const rightTower = new THREE.Mesh(rightTowerGeo, this.matSteelDark);
+    rightTower.position.y = 38;
+    rightTowerGroup.add(rightTower);
+
+    // Cyan vertical neon sign on right tower
+    const rightCyanSign = new THREE.Mesh(
+      new THREE.BoxGeometry(1.4, 9.0, 0.2),
+      this.matNeonCyan
+    );
+    rightCyanSign.position.set(-8.8, 32, 4);
+    rightCyanSign.rotation.y = -Math.PI / 2;
+    rightTowerGroup.add(rightCyanSign);
+
+    this.scene.add(rightTowerGroup);
+
+    // Pulsing neon light effect
+    this.animatables.push({
+      update: (time) => {
+        const pulse = 0.85 + Math.sin(time * 3.0) * 0.15;
+        this.matNeonCyan.color.setRGB(0 * pulse, 0.94 * pulse, 0.75 * pulse);
+        this.matNeonMagenta.color.setRGB(0.96 * pulse, 0.25 * pulse, 0.37 * pulse);
+      }
+    });
+  }
+
+  /**
+   * 6. Elevated Walkable Sky-Bridges Linking Towers:
+   */
+  private buildSkyBridges() {
+    // Main Walkable Sky-Bridge connecting Observation Deck to Center Tower
+    const bridgeGroup = new THREE.Group();
+    bridgeGroup.position.set(0, 3.8, -26);
+
+    const bridgeFloorGeo = new THREE.BoxGeometry(4.2, 0.8, 42);
+    const bridgeFloor = new THREE.Mesh(bridgeFloorGeo, this.matSteelGrate);
+    bridgeGroup.add(bridgeFloor);
+    this.walkableMeshes.push(bridgeFloor);
+
+    // Side safety railings along bridge
+    const railGeo = new THREE.BoxGeometry(0.2, 1.2, 42);
+    const leftRail = new THREE.Mesh(railGeo, this.matSteelDark);
+    leftRail.position.set(-2.0, 0.6, 0);
+    bridgeGroup.add(leftRail);
+
+    const rightRail = new THREE.Mesh(railGeo, this.matSteelDark);
+    rightRail.position.set(2.0, 0.6, 0);
+    bridgeGroup.add(rightRail);
+
+    // High Sky-Bridges in the background connecting towers together (visual scenery)
+    const highBridgeGeo = new THREE.BoxGeometry(26, 2.5, 3.5);
+    const highBridge1 = new THREE.Mesh(highBridgeGeo, this.matSteelPanel);
+    highBridge1.position.set(-10, 48, -45);
+    this.scene.add(highBridge1);
+
+    const highBridge2 = new THREE.Mesh(highBridgeGeo, this.matSteelPanel);
+    highBridge2.position.set(16, 36, -52);
+    this.scene.add(highBridge2);
+
+    this.scene.add(bridgeGroup);
+  }
+
+  /**
+   * 7. Geodesic Polyhedral Dome Habitat (Top of the Right Tower from Screenshot!):
+   */
+  private buildGeodesicDomes() {
+    const domeGroup = new THREE.Group();
+    domeGroup.position.set(32, 44, -38);
+
+    // Faceted icosahedral geodesic dome
+    const domeGeo = new THREE.IcosahedronGeometry(7.5, 1);
+    const dome = new THREE.Mesh(domeGeo, this.matDomeGlass);
+    domeGroup.add(dome);
+
+    const domeLight = new THREE.PointLight(0x67e8f9, 2.0, 24);
+    domeLight.position.set(0, 2, 0);
+    domeGroup.add(domeLight);
+
+    this.scene.add(domeGroup);
+  }
+
+  /**
+   * 8. Flying Aerial Speeders / Hover Vehicles Cruising Between Towers:
+   * With glowing red and cyan twin engine trail thrusters!
+   */
+  private buildAerialSpeeders() {
+    const createSpeeder = (startY: number, speed: number, radiusX: number, radiusZ: number) => {
+      const speederGroup = new THREE.Group();
+      speederGroup.position.set(0, startY, -35);
+
+      // Sleek chassis
+      const bodyGeo = new THREE.BoxGeometry(1.6, 0.65, 3.8);
+      const body = new THREE.Mesh(bodyGeo, this.matSteelDark);
+      speederGroup.add(body);
+
+      // Glowing cockpit windshield
+      const cabinGeo = new THREE.BoxGeometry(1.2, 0.45, 1.6);
+      const cabin = new THREE.Mesh(cabinGeo, this.matScreenGlow);
+      cabin.position.set(0, 0.4, 0.2);
+      speederGroup.add(cabin);
+
+      // Twin Engine Thruster Beams (Glowing red/cyan engine light trails)
+      const thrusterGeo = new THREE.CylinderGeometry(0.08, 0.08, 4.0, 6);
+      thrusterGeo.rotateX(Math.PI / 2);
+      const thrusterMat = new THREE.MeshBasicMaterial({ color: 0xef4444 });
+
+      const t1 = new THREE.Mesh(thrusterGeo, thrusterMat);
+      t1.position.set(-0.6, 0, 3.2);
+      speederGroup.add(t1);
+
+      const t2 = new THREE.Mesh(thrusterGeo, thrusterMat);
+      t2.position.set(0.6, 0, 3.2);
+      speederGroup.add(t2);
+
+      this.scene.add(speederGroup);
+      this.speeders.push(speederGroup);
+
+      // Cruise motion through the sky canyons
+      this.animatables.push({
+        update: (time) => {
+          const t = time * speed;
+          speederGroup.position.x = Math.sin(t) * radiusX;
+          speederGroup.position.z = -35 + Math.cos(t) * radiusZ;
+          speederGroup.position.y = startY + Math.sin(t * 1.5) * 1.2;
+          speederGroup.rotation.y = Math.cos(t) * 0.9;
         }
       });
     };
 
-    // Place 4 mysterious striders across different horizons
-    createStrider(140, -180, 1.4, -0.6);
-    createStrider(-170, -220, 1.7, 0.4);
-    createStrider(210, -80, 1.5, -1.2);
-    createStrider(-190, 90, 1.3, 1.8);
-  }
-
-  private buildDistantScenery() {
-    // Distant mountain ranges & rock arches on the horizon
-    const mountainGeo = new THREE.ConeGeometry(70, 120, 6);
-    const mountainMat = new THREE.MeshLambertMaterial({
-      color: 0x141f33,
-      flatShading: true,
-    });
-
-    for (let i = 0; i < 9; i++) {
-      const angle = (i / 9) * Math.PI * 2;
-      const m = new THREE.Mesh(mountainGeo, mountainMat);
-      m.position.set(
-        Math.cos(angle) * 440,
-        15 + Math.random() * 20,
-        Math.sin(angle) * 440
-      );
-      m.scale.set(1.2 + Math.random() * 0.8, 1.0 + Math.random() * 0.5, 1.2 + Math.random() * 0.8);
-      this.scene.add(m);
-    }
+    createSpeeder(12.0, 0.4, 28, 18);
+    createSpeeder(24.0, 0.35, 36, 22);
+    createSpeeder(6.0, 0.45, 20, 14);
   }
 
   /**
-   * Helper to create a stylized floating island mesh
+   * 9. Quantum Beacons / Anchors & Data Cores to discover:
    */
-  private createFloatingIsland(
-    radius: number,
-    depth: number,
-    position: THREE.Vector3,
-    roughness: number = 0.25
-  ): { group: THREE.Group; topMesh: THREE.Mesh } {
-    const group = new THREE.Group();
-    group.position.copy(position);
+  private buildQuantumAnchors() {
+    // Anchor Alpha: Observation Deck Relay
+    this.createAnchorStructure(
+      'anchor-alpha',
+      'Observation Terminal Alpha',
+      'The Drifting Land Primary Deck',
+      'Calibrated to monitor planetary atmospheric drift and transit speeders.',
+      [5, 4.6, -3],
+      0x00f0c0,
+      'anchor-beta'
+    );
 
-    // 1. Grassy Top Surface (Walkable)
-    const topGeo = new THREE.CylinderGeometry(radius, radius * 0.95, 1.2, 14);
-    // Perturb vertices slightly for low-poly organic feel
-    const pos = topGeo.attributes.position;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i);
-      const y = pos.getY(i);
-      const z = pos.getZ(i);
-      if (y > 0) {
-        pos.setY(i, y + (Math.sin(x * 0.8) + Math.cos(z * 0.8)) * roughness);
-      }
-    }
-    topGeo.computeVertexNormals();
+    // Anchor Beta: Mid-Bridge Quantum Anchor
+    this.createAnchorStructure(
+      'anchor-beta',
+      'Sky-Bridge Transit Anchor',
+      'Mid-Span Gateway Relay',
+      'Stabilizes the elevated transit catwalk between Sector 4 and the central citadel.',
+      [0, 4.6, -26],
+      0x38bdf8,
+      'anchor-gamma'
+    );
 
-    const topMesh = new THREE.Mesh(topGeo, this.matGrass);
-    topMesh.position.y = 0.6;
-    group.add(topMesh);
-    this.walkableMeshes.push(topMesh);
+    // Anchor Gamma: Geodesic Dome Core
+    this.createAnchorStructure(
+      'anchor-gamma',
+      'Geodesic Dome Sub-Relay',
+      'Sector 9 Research Habitat',
+      'Synchronizes the three quantum relays to reveal the Celestial Core.',
+      [26, 4.6, -36],
+      0xf43f5e,
+      'citadel'
+    );
 
-    // 2. Rocky Craggy Underside (Inverted cone with stalactites)
-    const underGeo = new THREE.ConeGeometry(radius * 0.96, depth, 14);
-    underGeo.rotateX(Math.PI);
-    const underMesh = new THREE.Mesh(underGeo, this.matRock);
-    underMesh.position.y = -depth / 2;
-    group.add(underMesh);
+    // World Fragments (Encrypted Data Cores)
+    this.createWorldFragment(
+      'fragment-alpha',
+      'Data Core: Genesis Orbit',
+      'Telemetry logs detailing the founding of The Drifting Land above the amber clouds.',
+      [-4, 5.2, -2]
+    );
 
-    // 3. Hanging crystal clusters underneath
-    const crystalGeo = new THREE.ConeGeometry(0.8, 4.0, 5);
-    crystalGeo.rotateX(Math.PI);
-    for (let c = 0; c < 5; c++) {
-      const cr = new THREE.Mesh(crystalGeo, this.matCrystalCyan);
-      const ang = Math.random() * Math.PI * 2;
-      const dist = (radius * 0.4) * Math.random();
-      cr.position.set(Math.cos(ang) * dist, -depth * 0.6 - Math.random() * 2, Math.sin(ang) * dist);
-      group.add(cr);
-    }
+    this.createWorldFragment(
+      'fragment-beta',
+      'Data Core: Transit Corridor',
+      'Flight routing plans for civilian speeders navigating the cloud canyons.',
+      [0, 5.2, -40]
+    );
 
-    this.scene.add(group);
-    return { group, topMesh };
+    this.createInscriptionStele(
+      'stele-terminal',
+      'Terminal Log: Atmospheric Survey',
+      'Altitude: 1,420m. Gas Giant Kepler-94d visible at Azimuth 140°. Cloud temperature steady at 18.4°C.',
+      [3.2, 4.6, -5]
+    );
   }
 
-  /**
-   * Helper to add stylized fantasy trees and glowing flora
-   */
-  private addFlora(parent: THREE.Group, x: number, z: number, type: 'tree' | 'bush' | 'crystals') {
-    if (type === 'tree') {
-      const treeGroup = new THREE.Group();
-      treeGroup.position.set(x, 1.2, z);
-
-      // Slender twisted trunk
-      const trunkGeo = new THREE.CylinderGeometry(0.3, 0.55, 4.5, 5);
-      const trunk = new THREE.Mesh(trunkGeo, this.matWood);
-      trunk.position.y = 2.25;
-      treeGroup.add(trunk);
-
-      // Layered polygonal foliage (Teal & Violet)
-      const f1Geo = new THREE.DodecahedronGeometry(2.2, 0);
-      const f1 = new THREE.Mesh(f1Geo, this.matFoliageTeal);
-      f1.position.set(0, 4.4, 0);
-      treeGroup.add(f1);
-
-      const f2Geo = new THREE.DodecahedronGeometry(1.6, 0);
-      const f2 = new THREE.Mesh(f2Geo, this.matFoliageViolet);
-      f2.position.set(0.6, 5.8, 0.4);
-      treeGroup.add(f2);
-
-      parent.add(treeGroup);
-    } else if (type === 'crystals') {
-      const cGeo = new THREE.ConeGeometry(0.4, 1.8, 5);
-      const crystal = new THREE.Mesh(cGeo, this.matCrystalCyan);
-      crystal.position.set(x, 1.2, z);
-      crystal.rotation.x = (Math.random() - 0.5) * 0.4;
-      crystal.rotation.z = (Math.random() - 0.5) * 0.4;
-      parent.add(crystal);
-    } else {
-      // Glow bush
-      const bushGeo = new THREE.IcosahedronGeometry(0.9, 0);
-      const bush = new THREE.Mesh(bushGeo, this.matFoliageTeal);
-      bush.position.set(x, 1.2, z);
-      bush.scale.set(1.2, 0.8, 1.1);
-      parent.add(bush);
-    }
-  }
-
-  /**
-   * Helper to build Ancient Stone Gateway / Broken Arch
-   */
-  private buildAncientArch(parent: THREE.Group, x: number, z: number, rotation: number) {
-    const archGroup = new THREE.Group();
-    archGroup.position.set(x, 1.2, z);
-    archGroup.rotation.y = rotation;
-
-    const pillarGeo = new THREE.BoxGeometry(1.4, 7.5, 1.4);
-    const p1 = new THREE.Mesh(pillarGeo, this.matAncientStone);
-    p1.position.set(-3, 3.75, 0);
-    archGroup.add(p1);
-    this.walkableMeshes.push(p1);
-
-    const p2 = new THREE.Mesh(pillarGeo, this.matAncientStone);
-    p2.position.set(3, 3.75, 0);
-    archGroup.add(p2);
-    this.walkableMeshes.push(p2);
-
-    // Lintel beam across top
-    const lintelGeo = new THREE.BoxGeometry(8.2, 1.2, 1.8);
-    const lintel = new THREE.Mesh(lintelGeo, this.matAncientStone);
-    lintel.position.set(0, 7.8, 0);
-    archGroup.add(lintel);
-    this.walkableMeshes.push(lintel);
-
-    // Floating rune ring in the center
-    const runeRingGeo = new THREE.TorusGeometry(1.6, 0.15, 6, 12);
-    const runeRing = new THREE.Mesh(runeRingGeo, this.matCrystalCyan);
-    runeRing.position.set(0, 4.2, 0);
-    archGroup.add(runeRing);
-
-    this.animatables.push({
-      update: (time) => {
-        runeRing.rotation.z = time * 0.5;
-        runeRing.rotation.y = Math.sin(time * 0.8) * 0.3;
-      }
-    });
-
-    parent.add(archGroup);
-  }
-
-  /**
-   * Helper to create a Magical Anchor pedestal with floating rotating crystal
-   */
   private createAnchorStructure(
     id: string,
     name: string,
@@ -456,60 +599,47 @@ export class WorldManager {
     const anchorGroup = new THREE.Group();
     anchorGroup.position.set(...pos);
 
-    // Carved stone pedestal dais
-    const baseGeo = new THREE.CylinderGeometry(1.8, 2.4, 0.8, 8);
-    const baseMesh = new THREE.Mesh(baseGeo, this.matAncientStone);
-    baseMesh.position.y = 0.4;
+    // Octagonal steel dais
+    const baseGeo = new THREE.CylinderGeometry(1.6, 2.0, 0.6, 8);
+    const baseMesh = new THREE.Mesh(baseGeo, this.matSteelDark);
+    baseMesh.position.y = 0.3;
     anchorGroup.add(baseMesh);
     this.walkableMeshes.push(baseMesh);
 
-    // Inner rune ring
-    const ringGeo = new THREE.TorusGeometry(1.2, 0.12, 6, 16);
-    ringGeo.rotateX(Math.PI / 2);
-    const ringMesh = new THREE.Mesh(ringGeo, this.matCrystalCyan);
-    ringMesh.position.y = 0.85;
-    anchorGroup.add(ringMesh);
-
-    // Hovering dual-pyramid crystal obelisk
-    const crystalGeo = new THREE.OctahedronGeometry(1.0, 0);
+    // Hovering Quantum Obelisk
+    const crystalGeo = new THREE.OctahedronGeometry(0.85, 0);
     const crystalMat = new THREE.MeshStandardMaterial({
       color: color,
       emissive: color,
-      emissiveIntensity: 0.9,
-      roughness: 0.15,
-      metalness: 0.2,
-      flatShading: true,
+      emissiveIntensity: 1.2,
+      roughness: 0.2,
     });
     const crystalMesh = new THREE.Mesh(crystalGeo, crystalMat);
-    crystalMesh.position.y = 2.4;
-    crystalMesh.scale.set(0.9, 1.8, 0.9);
+    crystalMesh.position.y = 2.0;
+    crystalMesh.scale.set(0.8, 1.5, 0.8);
     anchorGroup.add(crystalMesh);
 
-    // Point light
-    const pointLight = new THREE.PointLight(color, 2.0, 16);
-    pointLight.position.set(0, 2.4, 0);
+    const pointLight = new THREE.PointLight(color, 2.2, 14);
+    pointLight.position.set(0, 2.0, 0);
     anchorGroup.add(pointLight);
 
-    // Vertical ethereal beacon beam (cylinder, initially faint)
-    const beamGeo = new THREE.CylinderGeometry(0.2, 0.2, 60, 8);
+    // Vertical holographic beacon beam
+    const beamGeo = new THREE.CylinderGeometry(0.12, 0.12, 60, 6);
     const beamMat = new THREE.MeshBasicMaterial({
       color: color,
       transparent: true,
-      opacity: 0.2,
-      wireframe: false,
+      opacity: 0.35,
     });
     const beam = new THREE.Mesh(beamGeo, beamMat);
-    beam.position.y = 32;
+    beam.position.y = 30;
     anchorGroup.add(beam);
 
     this.scene.add(anchorGroup);
 
-    // Rotating and bobbing animation
     this.animatables.push({
       update: (time) => {
-        crystalMesh.rotation.y = time * 1.2;
-        crystalMesh.position.y = 2.4 + Math.sin(time * 2.0) * 0.2;
-        ringMesh.rotation.z = -time * 0.8;
+        crystalMesh.rotation.y = time * 1.4;
+        crystalMesh.position.y = 2.0 + Math.sin(time * 2.2) * 0.15;
       }
     });
 
@@ -531,9 +661,6 @@ export class WorldManager {
     return anchorData;
   }
 
-  /**
-   * Helper to create a collectible World Fragment
-   */
   private createWorldFragment(
     id: string,
     name: string,
@@ -543,35 +670,27 @@ export class WorldManager {
     const fragGroup = new THREE.Group();
     fragGroup.position.set(...pos);
 
-    // Floating multifaceted diamond shard
-    const fragGeo = new THREE.OctahedronGeometry(0.55, 0);
+    const fragGeo = new THREE.OctahedronGeometry(0.45, 0);
     const fragMat = new THREE.MeshStandardMaterial({
-      color: 0x67e8f9,
-      emissive: 0x38bdf8,
-      emissiveIntensity: 1.0,
-      roughness: 0.1,
-      metalness: 0.3,
+      color: 0x38bdf8,
+      emissive: 0x0284c7,
+      emissiveIntensity: 1.2,
     });
     const shard = new THREE.Mesh(fragGeo, fragMat);
     fragGroup.add(shard);
 
-    // Glowing orbiting mini-ring
-    const ringGeo = new THREE.TorusGeometry(0.85, 0.05, 6, 16);
-    const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xa5f3fc }));
+    const ringGeo = new THREE.TorusGeometry(0.7, 0.04, 6, 16);
+    const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0x67e8f9 }));
     fragGroup.add(ring);
-
-    const light = new THREE.PointLight(0x67e8f9, 1.5, 8);
-    fragGroup.add(light);
 
     this.scene.add(fragGroup);
 
     this.animatables.push({
       update: (time) => {
-        shard.rotation.x = time * 1.4;
-        shard.rotation.y = time * 1.8;
-        ring.rotation.x = Math.PI / 3 + Math.sin(time * 1.5) * 0.4;
-        ring.rotation.y = time * 2.2;
-        fragGroup.position.y = pos[1] + Math.sin(time * 2.5) * 0.15;
+        shard.rotation.x = time * 1.5;
+        shard.rotation.y = time * 2.0;
+        ring.rotation.x = time * 1.8;
+        fragGroup.position.y = pos[1] + Math.sin(time * 2.5) * 0.12;
       }
     });
 
@@ -588,424 +707,54 @@ export class WorldManager {
     return fragment;
   }
 
-  /**
-   * Helper to create Ancient Inscription Stele
-   */
   private createInscriptionStele(
     id: string,
     title: string,
     text: string,
     pos: [number, number, number]
   ) {
-    const steleGroup = new THREE.Group();
-    steleGroup.position.set(...pos);
+    const termGroup = new THREE.Group();
+    termGroup.position.set(...pos);
 
-    // Upright megalithic stone tablet
-    const tabletGeo = new THREE.BoxGeometry(1.2, 2.6, 0.4);
-    const tablet = new THREE.Mesh(tabletGeo, this.matAncientStone);
-    tablet.position.y = 1.3;
-    steleGroup.add(tablet);
-    this.walkableMeshes.push(tablet);
+    const boxGeo = new THREE.BoxGeometry(0.8, 1.4, 0.4);
+    const box = new THREE.Mesh(boxGeo, this.matSteelDark);
+    box.position.y = 0.7;
+    termGroup.add(box);
+    this.walkableMeshes.push(box);
 
-    // Glowing engraved glyph plate on front
-    const glyphGeo = new THREE.PlaneGeometry(0.8, 1.6);
-    const glyphMat = new THREE.MeshBasicMaterial({
-      color: 0x5eead4,
-      transparent: true,
-      opacity: 0.8,
-    });
-    const glyph = new THREE.Mesh(glyphGeo, glyphMat);
-    glyph.position.set(0, 1.4, 0.22);
-    steleGroup.add(glyph);
+    const screenGeo = new THREE.PlaneGeometry(0.6, 0.5);
+    const screen = new THREE.Mesh(screenGeo, this.matScreenGlow);
+    screen.position.set(0, 0.9, 0.21);
+    termGroup.add(screen);
 
-    this.scene.add(steleGroup);
+    this.scene.add(termGroup);
 
     const insc: InscriptionLore = {
       id,
       title,
       text,
       position: pos,
-      mesh: steleGroup,
+      mesh: termGroup,
     };
 
     this.inscriptions.push(insc);
     return insc;
   }
 
-  // 1. Starting Island: The Threshold
-  private buildStartingIsland() {
-    const { group } = this.createFloatingIsland(18, 16, new THREE.Vector3(0, 0, 0));
-
-    // Monumental broken Gateway Arch
-    this.buildAncientArch(group, 0, -10, 0);
-
-    // Ancient Inscription Stele
-    this.createInscriptionStele(
-      'stele-origins',
-      'The First Drift',
-      'Before the severing, the sky was a seamless continent. When the core fractured, the land drifted into an eternal sea of turquoise light. Find the three anchors of dawn, twilight, and meridian to awaken the resonance path.',
-      [4, 0.8, -4]
-    );
-
-    // Anchor Alpha (The Dawn Anchor)
-    this.createAnchorStructure(
-      'anchor-alpha',
-      'The Dawn Anchor',
-      'Anchor of the East Skies',
-      'An ancient harmonic anchor humming with dormant turquoise energy. Attune it to restore celestial resonance.',
-      [0, 0.8, -8],
-      0x2dd4bf, // luminous teal
-      'anchor-beta'
-    );
-
-    // World Fragment #1
-    this.createWorldFragment(
-      'fragment-alpha',
-      'Shard of Origins',
-      'A crystalline fragment glowing with the birth-light of the drifting realm.',
-      [7.5, 2.0, 6.0]
-    );
-
-    // Flora & Rocks
-    this.addFlora(group, -8, -4, 'tree');
-    this.addFlora(group, 9, -2, 'tree');
-    this.addFlora(group, -6, 7, 'tree');
-    this.addFlora(group, 8, 4, 'crystals');
-    this.addFlora(group, -5, -8, 'bush');
-    this.addFlora(group, 4, 8, 'bush');
-  }
-
-  // Stepping stones across the chasm between Island 1 and 2
-  private buildSteppingStones() {
-    const stonePositions = [
-      new THREE.Vector3(8, 0.6, -17),
-      new THREE.Vector3(13, 1.2, -22),
-      new THREE.Vector3(18, 2.0, -25),
-      // Path towards Island 3
-      new THREE.Vector3(-10, 0.8, -17),
-      new THREE.Vector3(-16, 1.4, -22),
-      new THREE.Vector3(-22, 1.9, -27),
-      // Cross link between 2 and 3
-      new THREE.Vector3(2, 2.2, -32),
-      new THREE.Vector3(-8, 2.2, -33),
-    ];
-
-    const stoneGeo = new THREE.CylinderGeometry(2.0, 1.6, 1.2, 7);
-    stonePositions.forEach((pos, idx) => {
-      const stone = new THREE.Mesh(stoneGeo, this.matAncientStone);
-      stone.position.copy(pos);
-      this.scene.add(stone);
-      this.walkableMeshes.push(stone);
-
-      // Subtle float animation
-      const origY = pos.y;
-      this.animatables.push({
-        update: (time) => {
-          stone.position.y = origY + Math.sin(time * 1.5 + idx * 0.8) * 0.12;
-        }
-      });
-    });
-  }
-
-  // 2. Second Island: The Twilight Spire
-  private buildSecondIsland() {
-    const { group } = this.createFloatingIsland(15, 14, new THREE.Vector3(25, 2.8, -32));
-
-    // Ruined Ancient Spire Tower
-    const towerGroup = new THREE.Group();
-    towerGroup.position.set(4, 1.2, -3);
-
-    const baseTowerGeo = new THREE.CylinderGeometry(3.5, 4.2, 16, 8);
-    const tower = new THREE.Mesh(baseTowerGeo, this.matRuinPillar);
-    tower.position.y = 8;
-    towerGroup.add(tower);
-
-    // Broken top of tower
-    const brokenTopGeo = new THREE.ConeGeometry(3.2, 6, 7);
-    const top = new THREE.Mesh(brokenTopGeo, this.matAncientStone);
-    top.position.y = 18;
-    top.rotation.z = 0.2;
-    towerGroup.add(top);
-
-    group.add(towerGroup);
-
-    // Anchor Beta (The Twilight Anchor)
-    this.createAnchorStructure(
-      'anchor-beta',
-      'The Twilight Anchor',
-      'Anchor of the High Spire',
-      'Resonates with the dusk frequency. When aligned with Dawn and Meridian, the ancient citadel shall reveal its sanctuary.',
-      [23, 3.6, -30],
-      0x38bdf8, // light blue / cyan
-      'anchor-gamma'
-    );
-
-    // World Fragment #2
-    this.createWorldFragment(
-      'fragment-beta',
-      'Core of Stillness',
-      'Pulsates with tranquil harmony, holding gravity steady across the jagged peaks.',
-      [27, 4.5, -36]
-    );
-
-    // Inscription Stele #2
-    this.createInscriptionStele(
-      'stele-threads',
-      'Song of the Threads',
-      'The threads are not cords of rope, but conduits of spatial intent. What is divided by the abyss can be bound once more through will and resonance.',
-      [21, 3.6, -26]
-    );
-
-    // Flora
-    this.addFlora(group, -6, 2, 'tree');
-    this.addFlora(group, 7, 4, 'crystals');
-  }
-
-  // 3. Third Island: The Meridian Sanctum
-  private buildThirdIsland() {
-    const { group } = this.createFloatingIsland(15, 14, new THREE.Vector3(-28, 2.2, -35));
-
-    // Megalithic Stone Circle ruins
-    const circleGroup = new THREE.Group();
-    circleGroup.position.set(0, 1.2, 0);
-
-    const pillarGeo = new THREE.BoxGeometry(1.2, 5.0, 1.2);
-    for (let i = 0; i < 6; i++) {
-      const angle = (i / 6) * Math.PI * 2;
-      const pil = new THREE.Mesh(pillarGeo, this.matAncientStone);
-      pil.position.set(Math.cos(angle) * 7, 2.5, Math.sin(angle) * 7);
-      pil.rotation.y = angle;
-      if (i % 2 === 1) pil.rotation.z = 0.15; // tilted/broken pillar
-      circleGroup.add(pil);
-      this.walkableMeshes.push(pil);
-    }
-    group.add(circleGroup);
-
-    // Anchor Gamma (The Meridian Anchor)
-    this.createAnchorStructure(
-      'anchor-gamma',
-      'The Meridian Anchor',
-      'Anchor of the Silent Meridian',
-      'The third vertex of the tri-fold seal. Awakening this anchor will finalize the resonance network and reveal the hidden island.',
-      [-28, 3.0, -35],
-      0x818cf8, // soft indigo-violet
-      'citadel'
-    );
-
-    // World Fragment #3
-    this.createWorldFragment(
-      'fragment-gamma',
-      'Shard of Continuity',
-      'An ancient geometric crystal humming with the frequency of the celestial architects.',
-      [-33, 4.0, -32]
-    );
-
-    // Inscription Stele #3
-    this.createInscriptionStele(
-      'stele-zenith',
-      'Awakening of Zenith',
-      'When all three anchors resonate in unison, the Sunken Zenith will rise from the ocean veil, opening the gate to the Drifting Core.',
-      [-24, 3.0, -38]
-    );
-
-    this.addFlora(group, 5, -5, 'tree');
-    this.addFlora(group, -6, 4, 'crystals');
-  }
-
-  // 4. The Hidden Resonance Island: The Drifting Citadel / Sunken Zenith
-  // Revealed when all 3 Anchors are activated!
-  private buildHiddenResonanceCitadel() {
-    this.citadelGroup = new THREE.Group();
-    // Initially positioned lower and further back in the heavy mist
-    this.citadelGroup.position.set(0, -18.0, -110.0);
-    this.citadelGroup.visible = true; // visible as a faint silhouette in fog
-
-    // Huge majestic island
-    const { group: citadelIsland, topMesh } = this.createFloatingIsland(24, 22, new THREE.Vector3(0, 0, 0), 0.35);
-    this.citadelGroup.add(citadelIsland);
-
-    // Colossal Ancient Temple / Monolith
-    const templeGroup = new THREE.Group();
-    templeGroup.position.set(0, 1.2, -6);
-
-    // Stepped Pyramid Base
-    const step1Geo = new THREE.BoxGeometry(22, 2.5, 22);
-    const step1 = new THREE.Mesh(step1Geo, this.matAncientStone);
-    step1.position.y = 1.25;
-    templeGroup.add(step1);
-    this.walkableMeshes.push(step1);
-
-    const step2Geo = new THREE.BoxGeometry(16, 2.5, 16);
-    const step2 = new THREE.Mesh(step2Geo, this.matAncientStone);
-    step2.position.y = 3.75;
-    templeGroup.add(step2);
-    this.walkableMeshes.push(step2);
-
-    // The Great Monolith - Visual landmark from prompt!
-    const monolithGeo = new THREE.BoxGeometry(3.6, 28, 3.6);
-    const monolith = new THREE.Mesh(monolithGeo, this.matAncientStone);
-    monolith.position.y = 18;
-    templeGroup.add(monolith);
-
-    // Glowing Central Core Sphere: The Heart of the Drifting World
-    const coreGeo = new THREE.IcosahedronGeometry(2.4, 2);
-    const coreMat = new THREE.MeshStandardMaterial({
-      color: 0x38bdf8,
-      emissive: 0x06b6d4,
-      emissiveIntensity: 1.2,
-      roughness: 0.1,
-    });
-    const coreMesh = new THREE.Mesh(coreGeo, coreMat);
-    coreMesh.position.set(0, 7.5, 4);
-    templeGroup.add(coreMesh);
-
-    const coreLight = new THREE.PointLight(0x38bdf8, 3.5, 30);
-    coreLight.position.copy(coreMesh.position);
-    templeGroup.add(coreLight);
-
-    // Core spin animation
-    this.animatables.push({
-      update: (time) => {
-        coreMesh.rotation.y = time * 0.9;
-        coreMesh.rotation.x = time * 0.6;
-        coreMesh.position.y = 7.5 + Math.sin(time * 2.0) * 0.3;
-      }
-    });
-
-    this.citadelGroup.add(templeGroup);
-    this.scene.add(this.citadelGroup);
-
-    // Final World Fragment #4: The Heart of the Zenith
-    this.createWorldFragment(
-      'fragment-zenith',
-      'The Celestial Heart',
-      'The legendary power core that binds the floating islands of the Drifting World together.',
-      [0, 8.5, -67] // will align after citadel rises
-    );
-
-    // The Luminous Resonance Bridge of Light (Materializes upon discovery)
-    this.citadelBridge = new THREE.Group();
-    this.citadelBridge.visible = false;
-
-    // Glowing energy stepping stones connecting from Island 2 & 3 to Citadel
-    const bridgeSteps = [
-      new THREE.Vector3(0, 3.5, -42),
-      new THREE.Vector3(0, 4.3, -48),
-      new THREE.Vector3(0, 5.1, -54),
-      new THREE.Vector3(0, 6.0, -60),
-    ];
-
-    const tileGeo = new THREE.BoxGeometry(4.0, 0.4, 3.5);
-    const tileMat = new THREE.MeshStandardMaterial({
-      color: 0x22d3ee,
-      emissive: 0x0891b2,
-      emissiveIntensity: 0.8,
-      roughness: 0.1,
-      transparent: true,
-      opacity: 0.88,
-    });
-
-    bridgeSteps.forEach((pos, idx) => {
-      const tile = new THREE.Mesh(tileGeo, tileMat);
-      tile.position.copy(pos);
-      this.citadelBridge.add(tile);
-      this.walkableMeshes.push(tile);
-
-      this.animatables.push({
-        update: (time) => {
-          tile.position.y = pos.y + Math.sin(time * 2.0 + idx * 0.7) * 0.08;
-        }
-      });
-    });
-
-    this.scene.add(this.citadelBridge);
-  }
-
-  /**
-   * Called when the Resonance Thread activates:
-   * Smoothly rises the Drifting Citadel into place and reveals the Light Bridge!
-   */
   public revealResonanceCitadel() {
-    this.isCitadelRevealed = true;
-    this.citadelBridge.visible = true;
-
-    // Elevate and bring forward the island
-    this.animatables.push({
-      update: (_time, delta) => {
-        if (this.citadelGroup.position.y < this.citadelTargetY) {
-          this.citadelGroup.position.y += (this.citadelTargetY - this.citadelGroup.position.y) * delta * 1.5;
-        }
-        if (this.citadelGroup.position.z < this.citadelTargetZ) {
-          this.citadelGroup.position.z += (this.citadelTargetZ - this.citadelGroup.position.z) * delta * 1.5;
-        }
-      }
-    });
-
-    // Update the position of Fragment #4 so it matches the final location
-    const zenithFrag = this.fragments.find(f => f.id === 'fragment-zenith');
-    if (zenithFrag && zenithFrag.mesh) {
-      zenithFrag.position = [0, 9.8, -65];
-      zenithFrag.mesh.position.set(0, 9.8, -65);
-    }
-  }
-
-  /**
-   * Ethereal motes / fireflies hovering in the atmosphere
-   */
-  private buildAtmosphericMotes() {
-    const moteCount = 180;
-    const moteGeo = new THREE.BufferGeometry();
-    const positions = new Float32Array(moteCount * 3);
-    const colors = new Float32Array(moteCount * 3);
-
-    const cyan = new THREE.Color(0x67e8f9);
-    const purple = new THREE.Color(0xc084fc);
-
-    for (let i = 0; i < moteCount; i++) {
-      positions[i * 3] = (Math.random() - 0.5) * 120;
-      positions[i * 3 + 1] = 0.5 + Math.random() * 22;
-      positions[i * 3 + 2] = (Math.random() - 0.5) * 120 - 30;
-
-      const c = Math.random() > 0.5 ? cyan : purple;
-      colors[i * 3] = c.r;
-      colors[i * 3 + 1] = c.g;
-      colors[i * 3 + 2] = c.b;
-    }
-
-    moteGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    moteGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-
-    const moteMat = new THREE.PointsMaterial({
-      size: 0.35,
-      vertexColors: true,
-      transparent: true,
-      opacity: 0.75,
-      blending: THREE.AdditiveBlending,
-    });
-
-    this.motesSystem = new THREE.Points(moteGeo, moteMat);
-    this.scene.add(this.motesSystem);
-
-    this.animatables.push({
-      update: (time) => {
-        const posAttr = moteGeo.attributes.position;
-        const array = posAttr.array as Float32Array;
-        for (let i = 0; i < moteCount; i++) {
-          array[i * 3 + 1] += Math.sin(time + i) * 0.015;
-          array[i * 3] += Math.cos(time * 0.5 + i) * 0.01;
-        }
-        posAttr.needsUpdate = true;
-      }
-    });
+    // Activates primary quantum energy beacon on the central tower
+    const beaconLight = new THREE.DirectionalLight(0x00f0c0, 2.5);
+    beaconLight.position.set(0, 100, -65);
+    this.scene.add(beaconLight);
   }
 
   public update(time: number, delta: number) {
-    this.animatables.forEach((item) => item.update(time, delta));
+    for (let i = 0; i < this.animatables.length; i++) {
+      this.animatables[i].update(time, delta);
+    }
   }
 
-  public setQuality(quality: 'low' | 'balanced' | 'high') {
-    if (this.motesSystem) {
-      this.motesSystem.visible = quality !== 'low';
-    }
+  public setQuality(_quality: 'low' | 'balanced' | 'high') {
+    // Quality adjustments
   }
 }

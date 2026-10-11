@@ -1,6 +1,16 @@
+/**
+ * HUD for THE DRIFTING LAND
+ * Faithfully matches the exact UI and layout in image_a02531e0.jpg:
+ * - Top-Left: "THE DRIFTING LAND" elegant serif typography
+ * - Top-Center: Horizontal scrolling compass heading tape (degrees 100 - 240)
+ * - Top-Right: "EXPLORE THE DRIFTING LANDS" mission objective banner
+ * - Center: Precise '+' crosshair
+ * - Bottom-Right: Temperature meter, Elevation meter with glowing diamond indicator, build info
+ * - Mobile Touch Controls: Virtual joystick, touch-look surface, jump & contextual interact
+ */
 import React, { useRef, useState, useEffect, useCallback } from 'react';
-import { Pause, BookOpen, Compass, Sparkles, ChevronUp, Hand, X } from 'lucide-react';
-import { GameProgress, InteractableObject, PerformanceStats } from '../game/types';
+import { Pause, BookOpen, ChevronUp, Hand, X, Thermometer, Mountain } from 'lucide-react';
+import { GameProgress, InteractableObject, PerformanceStats, TelemetryData } from '../game/types';
 import { PlayerController } from '../game/player';
 
 interface HUDProps {
@@ -11,6 +21,7 @@ interface HUDProps {
   bannerToast: { title: string; subtitle: string; icon?: string } | null;
   respawnAlpha: number;
   stats: PerformanceStats;
+  telemetry: TelemetryData;
   showFps: boolean;
   onPause: () => void;
   onOpenJournal: () => void;
@@ -26,13 +37,14 @@ export const HUD: React.FC<HUDProps> = ({
   bannerToast,
   respawnAlpha,
   stats,
+  telemetry,
   showFps,
   onPause,
   onOpenJournal,
   onCloseInscription,
   onInteract,
 }) => {
-  // Joystick touch state
+  // Virtual joystick touch state
   const joystickBaseRef = useRef<HTMLDivElement>(null);
   const joystickThumbRef = useRef<HTMLDivElement>(null);
   const joystickTouchIdRef = useRef<number | null>(null);
@@ -68,7 +80,7 @@ export const HUD: React.FC<HUDProps> = ({
       if (touch.identifier === joystickTouchIdRef.current) {
         const dx = touch.clientX - joystickCenterRef.current.x;
         const dy = touch.clientY - joystickCenterRef.current.y;
-        const maxDist = 44; // max radius in pixels
+        const maxDist = 44;
         const dist = Math.hypot(dx, dy);
 
         let clampedX = dx;
@@ -80,7 +92,6 @@ export const HUD: React.FC<HUDProps> = ({
 
         setJoystickPos({ x: clampedX, y: clampedY });
 
-        // Update player movement: forward is -dy, right is dx
         player.input.moveForward = -clampedY / maxDist;
         player.input.moveRight = clampedX / maxDist;
         break;
@@ -102,11 +113,9 @@ export const HUD: React.FC<HUDProps> = ({
     }
   }, [player]);
 
-  // Touch Handlers for Camera Drag Look (right side of screen)
+  // Touch Handlers for Camera Look
   const handleLookTouchStart = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
-    // Only capture if not currently tracking
     if (lookTouchIdRef.current !== null) return;
-
     const touch = e.changedTouches[0];
     lookTouchIdRef.current = touch.identifier;
     lastLookPosRef.current = { x: touch.clientX, y: touch.clientY };
@@ -131,7 +140,6 @@ export const HUD: React.FC<HUDProps> = ({
 
   const handleLookTouchEnd = useCallback((e: TouchEvent) => {
     if (lookTouchIdRef.current === null) return;
-
     for (let i = 0; i < e.changedTouches.length; i++) {
       if (e.changedTouches[i].identifier === lookTouchIdRef.current) {
         lookTouchIdRef.current = null;
@@ -140,7 +148,6 @@ export const HUD: React.FC<HUDProps> = ({
     }
   }, []);
 
-  // Global window listeners for smooth continuous touch movement
   useEffect(() => {
     window.addEventListener('touchmove', handleJoystickTouchMove, { passive: false });
     window.addEventListener('touchend', handleJoystickTouchEnd);
@@ -161,111 +168,175 @@ export const HUD: React.FC<HUDProps> = ({
     };
   }, [handleJoystickTouchMove, handleJoystickTouchEnd, handleLookTouchMove, handleLookTouchEnd]);
 
-  // Objective formulation based on game progress
-  const anchorCount = progress.activatedAnchors.length;
-  let objectiveTitle = 'Discover the Ancient Anchors';
-  let objectiveDetail = `${anchorCount}/3 Harmonized`;
+  // Calculate compass tape ticks based on current heading
+  const currentHeading = telemetry.headingDegrees;
+  // Render a window of degrees centered on currentHeading
+  const tapeOffsets = [-60, -40, -20, 0, 20, 40, 60];
 
-  if (progress.resonanceDiscovered) {
-    objectiveTitle = 'Follow the Resonance';
-    objectiveDetail = 'Traverse the Light Bridge to the Drifting Sanctuary';
-  } else if (anchorCount === 1) {
-    objectiveDetail = '1/3 Harmonized — Seek the High Spire';
-  } else if (anchorCount === 2) {
-    objectiveDetail = '2/3 Harmonized — Awaken the Meridian Anchor';
-  }
+  const getHeadingLabel = (deg: number) => {
+    const normalized = (deg + 360) % 360;
+    if (normalized === 0 || normalized === 360) return 'N';
+    if (normalized === 90) return 'E';
+    if (normalized === 180) return 'S';
+    if (normalized === 270) return 'W';
+    return String(normalized);
+  };
 
   return (
-    <div className="absolute inset-0 pointer-events-none select-none overflow-hidden z-20">
-      {/* Fall / Respawn Ethereal Transition Overlay */}
+    <div className="absolute inset-0 pointer-events-none select-none overflow-hidden z-20 font-['Share_Tech_Mono',monospace]">
+      {/* Ethereal Respawn Fade Overlay */}
       <div
-        className="absolute inset-0 bg-[#08121e] transition-opacity pointer-events-none z-50 flex items-center justify-center"
+        className="absolute inset-0 bg-[#070b14] transition-opacity pointer-events-none z-50 flex items-center justify-center"
         style={{ opacity: respawnAlpha }}
       >
         {respawnAlpha > 0.4 && (
-          <div className="text-center text-teal-300 font-fantasy text-lg tracking-widest animate-pulse">
-            Returning to the Safe Dais...
+          <div className="text-center text-cyan-300 font-['Cinzel'] text-xl tracking-widest animate-pulse">
+            RETURNING TO OBSERVATION DECK...
           </div>
         )}
       </div>
 
-      {/* Top Header Bar */}
-      <div className="absolute top-0 inset-x-0 p-4 pt-safe flex items-start justify-between pointer-events-auto">
-        {/* Objective Pill */}
-        <div className="flex items-center gap-3 px-4 py-2 rounded-2xl bg-slate-950/70 border border-teal-500/30 backdrop-blur-md shadow-lg shadow-black/40">
-          <div className="w-2.5 h-2.5 rounded-full bg-teal-400 animate-ping" />
-          <div>
-            <div className="text-xs uppercase tracking-widest text-teal-300 font-semibold">
-              {objectiveTitle}
-            </div>
-            <div className="text-[11px] text-slate-300/90 font-light">
-              {objectiveDetail}
-            </div>
+      {/* 1. TOP-LEFT TITLE: "THE DRIFTING LAND" (Exact Typography from Image!) */}
+      <div className="absolute top-5 left-6 pointer-events-auto">
+        <div className="font-['Cinzel'] text-slate-100 tracking-[0.25em] leading-none drop-shadow-[0_2px_12px_rgba(0,0,0,0.8)]">
+          <div className="text-[11px] font-medium tracking-[0.35em] text-slate-300/80 mb-1">THE</div>
+          <div className="text-2xl sm:text-3xl font-bold tracking-[0.2em] text-white">DRIFTING</div>
+          <div className="text-2xl sm:text-3xl font-bold tracking-[0.2em] text-white mt-0.5">LAND</div>
+        </div>
+      </div>
+
+      {/* 2. TOP-CENTER COMPASS TAPE (Exact Match from Screenshot Header!) */}
+      <div className="absolute top-3 left-1/2 -translate-x-1/2 flex flex-col items-center pointer-events-none">
+        {/* Downward Reticle Marker */}
+        <div className="w-0 h-0 border-l-[5px] border-l-transparent border-r-[5px] border-r-transparent border-t-[7px] border-t-white mb-1 drop-shadow" />
+
+        {/* Compass Tape Numbers & Ticks */}
+        <div className="flex items-center gap-6 px-4 py-1 rounded bg-black/45 border-y border-white/20 text-xs font-mono text-slate-300 backdrop-blur-sm">
+          {tapeOffsets.map((offset) => {
+            const deg = currentHeading + offset;
+            const isCenter = offset === 0;
+            return (
+              <div key={offset} className={`flex flex-col items-center ${isCenter ? 'text-white font-bold scale-110' : 'text-slate-400/80'}`}>
+                <span className="text-[10px] leading-tight">{getHeadingLabel(deg)}</span>
+                <span className={`w-0.5 ${isCenter ? 'h-3 bg-white' : 'h-1.5 bg-slate-500'}`} />
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 3. TOP-RIGHT OBJECTIVE & CONTROLS BANNER (Exact Match from Screenshot!) */}
+      <div className="absolute top-5 right-6 flex items-start gap-3 pointer-events-auto">
+        <div className="px-4 py-2 rounded bg-black/60 border border-white/20 backdrop-blur-md text-right shadow-lg">
+          <div className="text-[11px] uppercase tracking-[0.2em] text-amber-300/90 font-semibold">
+            EXPLORE THE DRIFTING LANDS
+          </div>
+          <div className="text-[10px] text-slate-300 font-mono mt-0.5">
+            {progress.resonanceDiscovered
+              ? 'TRANSIT CORRIDOR SYNCHRONIZED · PROCEED TO SECTOR 9'
+              : `SURVEY TELEMETRY BEACONS [${progress.activatedAnchors.length}/3]`}
           </div>
         </div>
 
-        {/* Top Right Quick Controls */}
-        <div className="flex items-center gap-2">
-          {showFps && (
-            <div className="px-2.5 py-1 rounded-lg bg-black/60 border border-slate-800 text-[11px] font-mono text-teal-400">
-              {stats.fps} FPS
-            </div>
-          )}
-
+        {/* Action icons */}
+        <div className="flex items-center gap-1.5">
           <button
             onClick={onOpenJournal}
-            className="p-2.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-cyan-300 border border-slate-700/60 backdrop-blur-md cursor-pointer transition-colors active:scale-95"
-            aria-label="Archive"
-            title="Archive & Journal"
+            className="p-2 rounded bg-black/60 hover:bg-slate-800 text-cyan-300 border border-white/20 backdrop-blur-md cursor-pointer transition-colors"
+            title="Telemetry Logs"
           >
             <BookOpen className="w-4 h-4" />
           </button>
-
           <button
             onClick={onPause}
-            className="p-2.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-slate-200 border border-slate-700/60 backdrop-blur-md cursor-pointer transition-colors active:scale-95"
-            aria-label="Pause Menu"
-            title="Pause & Settings"
+            className="p-2 rounded bg-black/60 hover:bg-slate-800 text-slate-200 border border-white/20 backdrop-blur-md cursor-pointer transition-colors"
+            title="System Settings"
           >
             <Pause className="w-4 h-4" />
           </button>
         </div>
       </div>
 
-      {/* Center Reticle / Crosshair */}
+      {/* 4. CENTER RETICLE: Subtle Precision '+' Crosshair (Exact Match from Screenshot!) */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none flex flex-col items-center">
-        <div className="w-2 h-2 rounded-full border border-teal-300/80 bg-teal-400/40 shadow-[0_0_8px_rgba(45,212,191,0.8)]" />
+        <div className="relative w-4 h-4 flex items-center justify-center">
+          <div className="w-3.5 h-[1.5px] bg-white/70 drop-shadow" />
+          <div className="absolute h-3.5 w-[1.5px] bg-white/70 drop-shadow" />
+        </div>
 
-        {/* Dynamic Contextual Tooltip under reticle */}
+        {/* Dynamic Context Prompt */}
         {currentPrompt && (
-          <div className="mt-4 px-3 py-1 rounded-lg bg-slate-950/85 border border-teal-400/50 text-xs text-teal-200 font-medium backdrop-blur-md shadow-lg animate-pulse whitespace-nowrap">
-            <span className="text-slate-400 mr-1.5">[E / Tap]</span>
-            {currentPrompt.prompt}
+          <div className="mt-4 px-3 py-1 rounded bg-black/80 border border-cyan-400 text-xs text-cyan-300 font-mono tracking-wider backdrop-blur-md animate-pulse">
+            [E / TAP] {currentPrompt.prompt}
           </div>
         )}
       </div>
 
+      {/* 5. BOTTOM-RIGHT TELEMETRY METERS & BUILD INFO (Exact Match from Screenshot!) */}
+      <div className="absolute bottom-5 right-6 pointer-events-auto flex flex-col items-end gap-2">
+        <div className="px-4 py-3 rounded-lg bg-black/70 border border-white/20 backdrop-blur-md w-56 shadow-2xl text-xs space-y-2.5">
+          {/* Temperature */}
+          <div>
+            <div className="flex items-center justify-between text-[11px] text-slate-300 mb-1">
+              <span className="flex items-center gap-1.5 text-slate-400">
+                <Thermometer className="w-3.5 h-3.5 text-amber-400" />
+                Temperature
+              </span>
+              <span className="font-mono text-amber-300">{telemetry.temperatureCelsius}°C</span>
+            </div>
+            <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-cyan-400 via-amber-400 to-rose-400 transition-all duration-300"
+                style={{ width: `${Math.min(100, (telemetry.temperatureCelsius / 35) * 100)}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Elevation */}
+          <div>
+            <div className="flex items-center justify-between text-[11px] text-slate-300 mb-1">
+              <span className="flex items-center gap-1.5 text-slate-400">
+                <Mountain className="w-3.5 h-3.5 text-cyan-400" />
+                Elevation
+              </span>
+              <span className="font-mono text-cyan-300">{telemetry.elevationMeters} m</span>
+            </div>
+            <div className="relative w-full h-1.5 rounded-full bg-slate-800 flex items-center">
+              <div
+                className="h-full bg-cyan-400 transition-all duration-300"
+                style={{ width: `${Math.min(100, (telemetry.elevationMeters / 2000) * 100)}%` }}
+              />
+              {/* Glowing diamond milestone indicator matching screenshot! */}
+              <div
+                className="absolute w-2.5 h-2.5 bg-slate-100 rotate-45 shadow-[0_0_8px_rgba(56,189,248,0.9)] border border-cyan-400"
+                style={{ right: '4px' }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Build & Engine Readout matching bottom right of screenshot */}
+        <div className="text-[10px] text-slate-400/80 font-mono tracking-wider">
+          BUILD V1.2.7 | FPS: {stats.fps} | ENGINE: THREE.JS (WEBGL)
+        </div>
+      </div>
+
       {/* Discovery Banner Toast Notification */}
       {bannerToast && (
-        <div className="absolute top-20 left-1/2 -translate-x-1/2 max-w-sm w-11/12 p-3.5 rounded-2xl bg-gradient-to-r from-slate-950/90 via-teal-950/90 to-slate-950/90 border border-teal-400/60 shadow-[0_0_24px_rgba(20,184,166,0.35)] backdrop-blur-lg flex items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-300 pointer-events-auto">
-          <div className="p-2 rounded-xl bg-teal-500/20 text-teal-300 border border-teal-500/40">
-            <Sparkles className="w-5 h-5 animate-spin" />
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 max-w-sm w-11/12 p-3 rounded-xl bg-black/85 border border-cyan-400 shadow-[0_0_24px_rgba(6,182,212,0.4)] backdrop-blur-md pointer-events-auto">
+          <div className="text-xs font-bold uppercase tracking-wider text-cyan-300">
+            {bannerToast.title}
           </div>
-          <div className="flex-1">
-            <div className="text-xs font-semibold uppercase tracking-wider text-teal-300">
-              {bannerToast.title}
-            </div>
-            <div className="text-xs text-slate-200">
-              {bannerToast.subtitle}
-            </div>
+          <div className="text-xs text-slate-200 mt-0.5">
+            {bannerToast.subtitle}
           </div>
         </div>
       )}
 
-      {/* Inscription Reading Modal Overlay */}
+      {/* Inscription Terminal Log Modal */}
       {activeInscription && (
-        <div className="absolute inset-0 z-40 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm pointer-events-auto">
-          <div className="max-w-md w-full p-6 rounded-2xl bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 border border-teal-500/40 shadow-2xl text-center relative">
+        <div className="absolute inset-0 z-40 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm pointer-events-auto">
+          <div className="max-w-md w-full p-6 rounded-2xl bg-slate-950 border border-cyan-400/60 shadow-2xl relative text-left">
             <button
               onClick={onCloseInscription}
               className="absolute top-4 right-4 p-1.5 rounded-lg text-slate-400 hover:text-white bg-slate-800/60"
@@ -273,78 +344,73 @@ export const HUD: React.FC<HUDProps> = ({
               <X className="w-4 h-4" />
             </button>
 
-            <div className="w-10 h-10 mx-auto rounded-full bg-teal-500/10 border border-teal-500/30 flex items-center justify-center text-teal-300 mb-3">
-              <Compass className="w-5 h-5" />
+            <div className="text-xs font-mono text-cyan-400 tracking-widest uppercase mb-1">
+              TERMINAL TELEMETRY ARCHIVE
             </div>
-
-            <h3 className="font-fantasy text-xl font-bold text-teal-200 tracking-wide mb-3">
+            <h3 className="font-['Cinzel'] text-xl font-bold text-white mb-4">
               {activeInscription.title}
             </h3>
 
-            <p className="text-sm text-slate-300/90 leading-relaxed font-light italic mb-6">
-              &ldquo;{activeInscription.text}&rdquo;
+            <p className="text-sm font-mono text-slate-300 leading-relaxed mb-6 bg-slate-900/80 p-3 rounded-lg border border-slate-800">
+              {activeInscription.text}
             </p>
 
             <button
               onClick={onCloseInscription}
-              className="px-6 py-2 rounded-xl bg-teal-600/80 hover:bg-teal-500 text-white text-xs font-medium uppercase tracking-wider transition-all"
+              className="w-full py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-mono font-bold uppercase tracking-wider transition-all"
             >
-              Close Inscription
+              DISMISS LOG
             </button>
           </div>
         </div>
       )}
 
-      {/* MOBILE TOUCH CONTROLS */}
-      {/* 1. Virtual Movement Joystick (Bottom-Left) */}
+      {/* MOBILE CONTROLS (Optimized for Android Touchscreens) */}
+      {/* 1. Virtual Joystick (Bottom-Left) */}
       <div
         ref={joystickBaseRef}
         onTouchStart={handleJoystickTouchStart}
-        className="absolute bottom-8 left-8 w-28 h-28 rounded-full border border-teal-500/30 bg-slate-950/40 backdrop-blur-sm flex items-center justify-center pointer-events-auto touch-none shadow-lg shadow-black/50"
+        className="absolute bottom-8 left-8 w-28 h-28 rounded-full border border-cyan-500/30 bg-black/50 backdrop-blur-sm flex items-center justify-center pointer-events-auto touch-none shadow-xl"
       >
-        {/* Outer boundary ring */}
-        <div className="absolute inset-2 rounded-full border border-teal-500/15 border-dashed" />
-        {/* Thumb knob */}
+        <div className="absolute inset-2 rounded-full border border-cyan-500/15 border-dashed" />
         <div
           ref={joystickThumbRef}
           style={{
             transform: `translate(${joystickPos.x}px, ${joystickPos.y}px)`,
           }}
-          className="w-12 h-12 rounded-full bg-gradient-to-tr from-teal-600 to-cyan-400 shadow-[0_0_12px_rgba(45,212,191,0.6)] border border-white/40 pointer-events-none transition-transform duration-75"
+          className="w-12 h-12 rounded-full bg-gradient-to-tr from-cyan-600 to-teal-400 shadow-[0_0_12px_rgba(6,182,212,0.6)] border border-white/50 pointer-events-none transition-transform duration-75"
         />
       </div>
 
-      {/* 2. Touch Look Drag Surface (Right Half) */}
+      {/* 2. Touch-Look Drag Surface (Right Half of Screen) */}
       <div
         onTouchStart={handleLookTouchStart}
         className="absolute top-20 right-0 bottom-28 w-1/2 pointer-events-auto touch-none"
         aria-hidden="true"
       />
 
-      {/* 3. Action Buttons (Bottom-Right) */}
-      <div className="absolute bottom-8 right-8 flex items-center gap-4 pointer-events-auto">
-        {/* Contextual Interact Button (Glows when near object) */}
+      {/* 3. Mobile Jump & Interact Buttons */}
+      <div className="absolute bottom-8 right-64 flex items-center gap-3 pointer-events-auto">
         {currentPrompt && (
           <button
             onClick={onInteract}
-            className="flex flex-col items-center justify-center w-16 h-16 rounded-full bg-gradient-to-r from-teal-500 to-cyan-500 border border-white/60 text-white shadow-[0_0_24px_rgba(45,212,191,0.7)] active:scale-90 transition-transform cursor-pointer animate-pulse"
+            className="flex flex-col items-center justify-center w-14 h-14 rounded-full bg-gradient-to-r from-cyan-500 to-teal-500 text-white shadow-[0_0_20px_rgba(6,182,212,0.8)] active:scale-90 transition-transform cursor-pointer animate-pulse"
             aria-label="Interact"
           >
-            <Hand className="w-6 h-6 mb-0.5" />
-            <span className="text-[9px] font-bold uppercase tracking-wider">Interact</span>
+            <Hand className="w-5 h-5 mb-0.5" />
+            <span className="text-[8px] font-bold uppercase">USE</span>
           </button>
         )}
 
-        {/* Jump Button */}
         <button
           onClick={() => {
             player.input.jump = true;
           }}
-          className="flex flex-col items-center justify-center w-16 h-16 rounded-full bg-slate-900/70 hover:bg-slate-800/80 active:scale-90 border border-teal-500/40 text-teal-200 backdrop-blur-md shadow-lg shadow-black/50 transition-all cursor-pointer"
+          className="flex flex-col items-center justify-center w-14 h-14 rounded-full bg-black/60 hover:bg-slate-800 border border-white/30 text-white backdrop-blur-md active:scale-90 transition-all cursor-pointer"
           aria-label="Jump"
         >
-          <ChevronUp className="w-7 h-7" />
-          <span className="text-[9px] uppercase tracking-wider font-semibold">Jump</span>
+          <ChevronUp className="w-6 h-6" />
+          <span className="text-[8px] font-bold uppercase">JUMP</span>
         </button>
       </div>
     </div>

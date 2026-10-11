@@ -8,7 +8,7 @@ import { PlayerController } from './player';
 import { WorldManager } from './world';
 import { ThreadManager } from './threads';
 import { InteractionManager, InteractionState } from './interactions';
-import { GameSettings, PerformanceStats } from './types';
+import { GameSettings, PerformanceStats, TelemetryData } from './types';
 import { soundSystem } from './audio';
 
 export class GameEngine {
@@ -39,6 +39,7 @@ export class GameEngine {
   // External listeners
   public onPerformanceUpdate?: (stats: PerformanceStats) => void;
   public onRespawnEffect?: (alpha: number) => void;
+  public onTelemetryUpdate?: (data: TelemetryData) => void;
 
   constructor(container: HTMLElement, settings: GameSettings) {
     this.container = container;
@@ -50,6 +51,9 @@ export class GameEngine {
     this.initGameSystems();
     this.setupDesktopInputs();
     this.setupResizeListener();
+
+    // Start 3D background simulation immediately so the user sees the world from frame 1
+    this.start();
   }
 
   private initScene() {
@@ -122,15 +126,14 @@ export class GameEngine {
   }
 
   private initGameSystems() {
-    // 1. Player
-    this.player = new PlayerController([0, 2.8, 0]);
-    this.player.setSensitivity(this.settings.sensitivity);
-
-    // 2. World
+    // 1. World built first and world matrix transformed
     this.world = new WorldManager(this.scene);
     this.world.buildWorld();
+    this.scene.updateMatrixWorld(true);
 
-    // Link walkable meshes for player ground collision
+    // 2. Player (Third Person ONLY) safely spawned at platform floor height y = 4.2
+    this.player = new PlayerController(this.scene, [0, 4.2, 0]);
+    this.player.setSensitivity(this.settings.sensitivity);
     this.player.walkableMeshes = this.world.walkableMeshes;
 
     // 3. Threads
@@ -190,6 +193,11 @@ export class GameEngine {
 
       // 2. Update player physics and first-person camera
       this.player.update(delta);
+
+      // Emit telemetry (heading, elevation, temperature) for HUD
+      if (this.onTelemetryUpdate) {
+        this.onTelemetryUpdate(this.player.getTelemetry());
+      }
 
       // Notify UI of respawn fade overlay
       if (this.onRespawnEffect) {

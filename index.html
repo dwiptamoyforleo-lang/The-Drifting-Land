@@ -3,10 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <title>The Drifting World</title>
-    <meta name="description" content="A mobile-optimized first-person fantasy exploration game set across a vast luminous turquoise ocean and floating islands connected by magical resonance threads." />
-    <meta property="og:title" content="The Drifting World" />
-    <meta property="og:description" content="A mobile-optimized first-person fantasy exploration game set across a vast luminous turquoise ocean and floating islands connected by magical resonance threads." />
+    <title>THE DRIFTING LAND</title>
+    <meta name="description" content="A mobile-optimized first-person sci-fi exploration game set across towering citadels above golden clouds and a colossal turquoise gas giant." />
+    <meta property="og:title" content="THE DRIFTING LAND" />
+    <meta property="og:description" content="A mobile-optimized first-person sci-fi exploration game set across towering citadels above golden clouds and a colossal turquoise gas giant." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="theme-color" content="#0d1b2a" />
@@ -15,7 +15,7 @@
     <link rel="manifest" href="./manifest.json" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800&family=Share+Tech+Mono&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
       /* Fallback styling guaranteeing the screen is never white */
       html, body {
@@ -34,37 +34,51 @@
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        background: radial-gradient(circle at center, #0f1c30 0%, #070b14 75%);
+        background: radial-gradient(circle at center, #131c2d 0%, #060a12 85%);
         font-family: 'Cinzel', serif, sans-serif;
         text-align: center;
         padding: 24px;
         z-index: 10;
       }
       .shell-title {
-        font-size: 28px;
+        font-size: 32px;
         font-weight: 700;
-        letter-spacing: 0.2em;
-        color: #2dd4bf;
-        text-shadow: 0 0 20px rgba(45, 212, 191, 0.4);
-        margin-bottom: 12px;
+        letter-spacing: 0.22em;
+        color: #f1f5f9;
+        text-shadow: 0 0 24px rgba(45, 212, 191, 0.5);
+        margin-bottom: 8px;
       }
       .shell-subtitle {
-        font-family: 'Plus Jakarta Sans', sans-serif;
-        font-size: 14px;
-        color: #94a3b8;
-        font-style: italic;
-        margin-bottom: 28px;
+        font-family: 'Share Tech Mono', monospace, sans-serif;
+        font-size: 13px;
+        color: #38bdf8;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        margin-bottom: 24px;
       }
       .shell-spinner {
         width: 44px;
         height: 44px;
-        border: 3px solid rgba(45, 212, 191, 0.2);
-        border-top-color: #2dd4bf;
+        border: 3px solid rgba(56, 189, 248, 0.2);
+        border-top-color: #38bdf8;
         border-radius: 50%;
-        animation: shellSpin 1s linear infinite;
+        animation: shellSpin 0.9s linear infinite;
       }
       @keyframes shellSpin {
         to { transform: rotate(360deg); }
+      }
+      #fallback-diagnostic {
+        display: none;
+        margin-top: 20px;
+        max-width: 380px;
+        padding: 16px;
+        background: rgba(15, 23, 42, 0.9);
+        border: 1px solid rgba(56, 189, 248, 0.3);
+        border-radius: 12px;
+        font-family: 'Share Tech Mono', monospace;
+        font-size: 11px;
+        color: #94a3b8;
+        line-height: 1.5;
       }
     </style>
   </head>
@@ -72,11 +86,32 @@
     <div id="root" class="h-full w-full">
       <!-- Initial Loading Shell (Replaced automatically when React mounts) -->
       <div id="initial-shell">
-        <div class="shell-title">THE DRIFTING WORLD</div>
-        <div class="shell-subtitle">Summoning the celestial islands and turquoise ocean...</div>
-        <div class="shell-spinner"></div>
+        <div class="shell-title">THE DRIFTING LAND</div>
+        <div class="shell-subtitle">CALIBRATING TELEMETRY & DRIVING CITADELS</div>
+        <div class="shell-spinner" id="shell-spinner"></div>
+        <div id="fallback-diagnostic">
+          <p style="color: #38bdf8; font-weight: bold; margin-bottom: 6px;">LOAD DIAGNOSTIC</p>
+          <p id="diag-msg">Initializing 3D WebGL engine...</p>
+          <button onclick="window.location.reload()" style="margin-top: 10px; padding: 6px 14px; background: #0284c7; color: white; border: none; border-radius: 6px; cursor: pointer; font-family: monospace;">Reload Engine</button>
+        </div>
       </div>
     </div>
+    <script>
+      // Safeguard: If React has not mounted within 4.5 seconds, display diagnostic info
+      setTimeout(function() {
+        var root = document.getElementById('root');
+        var diag = document.getElementById('fallback-diagnostic');
+        var spinner = document.getElementById('shell-spinner');
+        if (root && document.getElementById('initial-shell') && diag) {
+          diag.style.display = 'block';
+          if (spinner) spinner.style.display = 'none';
+          var msg = document.getElementById('diag-msg');
+          if (msg) {
+            msg.innerHTML = "If deployed on GitHub Pages, verify that Settings > Pages is configured to <b>GitHub Actions</b> so the compiled build is served.";
+          }
+        }
+      }, 4500);
+    </script>
     <script type="module" src="./src/main.tsx"></script>
   </body>
 </html>
