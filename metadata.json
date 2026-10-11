@@ -1,0 +1,6 @@
+{
+  "name": "The Drifting World",
+  "description": "A mobile-optimized first-person fantasy exploration game set across a vast luminous turquoise ocean and floating islands connected by magical resonance threads.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
