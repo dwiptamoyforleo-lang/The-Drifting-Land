@@ -67,6 +67,45 @@ When all three anchors are tuned in harmonic resonance:
 
 ---
 
+## 🚀 GitHub Pages Deployment
+
+The repository is configured for automatic deployment to GitHub Pages at:
+**`https://dwiptamoyforleo-lang.github.io/the-drifting-world/`**
+
+### Automatic Deployment via GitHub Actions
+A production GitHub Actions workflow is provided at `.github/workflows/deploy.yml`.
+
+1. Push this repository to GitHub:
+   ```bash
+   git init
+   git add .
+   git commit -m "Initialize The Drifting World with GitHub Pages workflow"
+   git remote add origin https://github.com/dwiptamoyforleo-lang/the-drifting-world.git
+   git branch -M main
+   git push -u origin main
+   ```
+2. In your GitHub repository:
+   - Navigate to **Settings > Pages**
+   - Under **Build and deployment > Source**, select **GitHub Actions**
+3. Once selected, pushing to `main` automatically builds with `base: '/the-drifting-world/'`, generates the `dist/` directory, and publishes the live game.
+
+---
+
+## 🛠️ White Screen Resolution Summary
+
+The white screen issue was caused by several compounding issues in standard Vite static deployments:
+
+1. **Subpath Asset 404s**: By default, Vite builds with `base: '/'`. When hosted on GitHub Pages under the subpath `/the-drifting-world/`, the browser requested assets at the domain root (e.g., `https://dwiptamoyforleo-lang.github.io/assets/...`) which resulted in HTTP 404s. The script never ran, leaving a blank white page.
+   - **Fix**: Configured `base: '/the-drifting-world/'` for production builds in `vite.config.ts`, while keeping `/` for local development.
+2. **Missing Fallback HTML & Canvas Styles**: The `<html>` and `<body>` tags had no default dark background style before Tailwind CSS mounted. If scripts failed or took time to bundle, the browser defaulted to a white canvas.
+   - **Fix**: Injected inline dark background styling (`#070b14`) on `html` and `body`, plus an immediate fantasy loading shell inside `#root`.
+3. **Unhandled WebGL Exceptions**: If WebGL context creation threw an error, React unmounted without an error boundary.
+   - **Fix**: Wrapped the entire application in a React `ErrorBoundary` with a dedicated WebGL recovery card (switch to Low Graphics mode, troubleshooting guide, and reload button), and added fallback renderer options in `src/game/engine.ts`.
+4. **Hardcoded Root Paths in PWA Manifest & Service Worker**: `/icon.svg` and `/manifest.json` pointed to the root domain.
+   - **Fix**: Changed to relative URLs (`./icon.svg`, `./manifest.json`) and updated `sw.js` to dynamically detect scope.
+
+---
+
 ## 📦 Packaging for Android APK
 
 This project is built with standard Web Standards, PWA manifest, and service worker. You can convert it into an Android APK using **Capacitor**:

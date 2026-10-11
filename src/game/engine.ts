@@ -57,16 +57,42 @@ export class GameEngine {
   }
 
   private initRenderer() {
-    this.renderer = new THREE.WebGLRenderer({
-      antialias: this.settings.graphicsQuality !== 'low',
-      powerPreference: 'high-performance',
-      precision: this.settings.graphicsQuality === 'low' ? 'mediump' : 'highp',
-      stencil: false,
-    });
+    let rendererInstance: THREE.WebGLRenderer | null = null;
 
+    try {
+      // First attempt with preferred settings
+      rendererInstance = new THREE.WebGLRenderer({
+        antialias: this.settings.graphicsQuality !== 'low',
+        powerPreference: 'high-performance',
+        precision: this.settings.graphicsQuality === 'low' ? 'mediump' : 'highp',
+        stencil: false,
+      });
+    } catch (primaryErr) {
+      console.warn('Primary WebGL initialization failed, attempting fallback:', primaryErr);
+      try {
+        // Fallback attempt with minimal requirements
+        rendererInstance = new THREE.WebGLRenderer({
+          antialias: false,
+          powerPreference: 'default',
+          precision: 'mediump',
+          stencil: false,
+        });
+      } catch (fallbackErr) {
+        console.error('Fatal WebGL initialization error:', fallbackErr);
+        throw new Error(
+          'WebGL 3D graphics could not be initialized. Please ensure hardware acceleration is enabled in your browser settings and graphics drivers are up to date.'
+        );
+      }
+    }
+
+    this.renderer = rendererInstance;
     this.applyQualitySettings(this.settings.graphicsQuality);
 
-    this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
+    // Guaranteed positive dimensions even during layout reflows
+    const width = Math.max(this.container.clientWidth || window.innerWidth || 800, 320);
+    const height = Math.max(this.container.clientHeight || window.innerHeight || 600, 240);
+
+    this.renderer.setSize(width, height);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
 

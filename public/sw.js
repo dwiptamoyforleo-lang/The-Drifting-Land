@@ -1,16 +1,26 @@
 // Service Worker for The Drifting World
-const CACHE_NAME = 'drifting-world-v1';
-const ASSETS_TO_CACHE = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/icon.svg'
-];
+const CACHE_NAME = 'drifting-world-v2';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE);
+    caches.open(CACHE_NAME).then(async (cache) => {
+      // Determine base path from the service worker location
+      const basePath = self.registration.scope;
+      const assets = [
+        basePath,
+        `${basePath}index.html`,
+        `${basePath}manifest.json`,
+        `${basePath}icon.svg`
+      ];
+
+      // Cache files individually so a 404 on one never causes install rejection
+      for (const url of assets) {
+        try {
+          await cache.add(url);
+        } catch {
+          // Non-fatal if asset not reachable
+        }
+      }
     }).then(() => self.skipWaiting())
   );
 });
@@ -36,11 +46,9 @@ self.addEventListener('fetch', (event) => {
       if (cachedResponse) {
         return cachedResponse;
       }
-      return fetch(event.request).then((networkResponse) => {
-        return networkResponse;
-      }).catch(() => {
-        // Fallback if offline
-        return caches.match('/index.html');
+      return fetch(event.request).catch(() => {
+        // Fallback to cached index.html
+        return caches.match(`${self.registration.scope}index.html`);
       });
     })
   );
