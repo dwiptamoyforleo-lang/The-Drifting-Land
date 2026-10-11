@@ -284,8 +284,8 @@ export class GameEngine {
   private setupResizeListener() {
     const onResize = () => {
       if (!this.container || !this.renderer) return;
-      const width = this.container.clientWidth;
-      const height = this.container.clientHeight;
+      const width = Math.max(this.container.clientWidth || window.innerWidth || 800, 320);
+      const height = Math.max(this.container.clientHeight || window.innerHeight || 600, 240);
 
       this.player.camera.aspect = width / height;
       this.player.camera.updateProjectionMatrix();

@@ -29,7 +29,7 @@ export const INITIAL_PROGRESS: GameProgress = {
   collectedFragments: [],
   resonanceDiscovered: false,
   citadelExplored: false,
-  lastCheckpoint: [0, 2.5, 0],
+  lastCheckpoint: [0, 4.2, 0],
 };
 
 export function loadSettings(): GameSettings {

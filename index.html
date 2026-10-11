@@ -16,6 +16,12 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800&family=Share+Tech+Mono&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+      // Ensure trailing slash on subpath URLs (e.g. GitHub Pages) so relative assets resolve correctly
+      if (window.location.pathname && !window.location.pathname.endsWith('/') && !window.location.pathname.includes('.')) {
+        window.location.replace(window.location.pathname + '/' + window.location.search + window.location.hash);
+      }
+    </script>
     <style>
       /* Fallback styling guaranteeing the screen is never white */
       html, body {
@@ -97,6 +103,19 @@
       </div>
     </div>
     <script>
+      // Global error listener to immediately show diagnostics if any script fails
+      window.addEventListener('error', function(e) {
+        var diag = document.getElementById('fallback-diagnostic');
+        var spinner = document.getElementById('shell-spinner');
+        var msg = document.getElementById('diag-msg');
+        if (diag && msg && document.getElementById('initial-shell')) {
+          diag.style.display = 'block';
+          if (spinner) spinner.style.display = 'none';
+          msg.innerHTML = '<span style="color: #f87171; font-weight: bold;">Initialization Note:</span> ' + (e.message || 'Script execution interrupted.') +
+            '<br><br>If deploying to GitHub Pages, ensure repository <b>Settings &gt; Pages &gt; Build and deployment &gt; Source</b> is set to <b>GitHub Actions</b> (or branch <b>gh-pages</b>).';
+        }
+      });
+
       // Safeguard: If React has not mounted within 4.5 seconds, display diagnostic info
       setTimeout(function() {
         var root = document.getElementById('root');
@@ -107,12 +126,12 @@
           if (spinner) spinner.style.display = 'none';
           var msg = document.getElementById('diag-msg');
           if (msg) {
-            msg.innerHTML = "If deployed on GitHub Pages, verify that Settings > Pages is configured to <b>GitHub Actions</b> so the compiled build is served.";
+            msg.innerHTML = "Still loading 3D assets... If deployed on GitHub Pages, verify repository <b>Settings &gt; Pages &gt; Source</b> is set to <b>GitHub Actions</b> so the compiled 3D build is served.";
           }
         }
       }, 4500);
     </script>
-    <script type="module" src="./src/main.tsx"></script>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
 
