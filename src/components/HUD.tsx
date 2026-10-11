@@ -9,8 +9,8 @@
  * - Mobile Touch Controls: Virtual joystick, touch-look surface, jump & contextual interact
  */
 import React, { useRef, useState, useEffect, useCallback } from 'react';
-import { Pause, BookOpen, ChevronUp, Hand, X, Thermometer, Mountain } from 'lucide-react';
-import { GameProgress, InteractableObject, PerformanceStats, TelemetryData } from '../game/types';
+import { Pause, BookOpen, ChevronUp, Hand, X, Thermometer, Mountain, Eye, Video, Target } from 'lucide-react';
+import { GameProgress, InteractableObject, PerformanceStats, TelemetryData, CameraMode } from '../game/types';
 import { PlayerController } from '../game/player';
 
 interface HUDProps {
@@ -25,8 +25,10 @@ interface HUDProps {
   showFps: boolean;
   onPause: () => void;
   onOpenJournal: () => void;
+  onOpenQuests?: () => void;
   onCloseInscription: () => void;
   onInteract: () => void;
+  onToggleCamera: () => void;
 }
 
 export const HUD: React.FC<HUDProps> = ({
@@ -41,8 +43,10 @@ export const HUD: React.FC<HUDProps> = ({
   showFps,
   onPause,
   onOpenJournal,
+  onOpenQuests,
   onCloseInscription,
   onInteract,
+  onToggleCamera,
 }) => {
   // Virtual joystick touch state
   const joystickBaseRef = useRef<HTMLDivElement>(null);
@@ -227,11 +231,26 @@ export const HUD: React.FC<HUDProps> = ({
 
       {/* 3. TOP-RIGHT OBJECTIVE & CONTROLS BANNER (Exact Match from Screenshot!) */}
       <div className="absolute top-5 right-6 flex items-start gap-3 pointer-events-auto">
-        <div className="px-4 py-2 rounded bg-black/60 border border-white/20 backdrop-blur-md text-right shadow-lg">
-          <div className="text-[11px] uppercase tracking-[0.2em] text-amber-300/90 font-semibold">
-            EXPLORE THE DRIFTING LANDS
+        <div
+          onClick={onOpenQuests}
+          className="px-4 py-2 rounded bg-black/60 hover:bg-black/80 border border-white/20 hover:border-cyan-400/50 backdrop-blur-md text-right shadow-lg cursor-pointer transition-all group"
+          title="Click to view Mission Objectives & Quests"
+        >
+          <div className="flex items-center justify-end gap-2 mb-0.5">
+            {telemetry.timeOfDay === 'red_moon' ? (
+              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-rose-950/80 border border-rose-500 text-rose-300 font-bold animate-pulse">
+                RED MOON ECLIPSE
+              </span>
+            ) : (
+              <span className="text-[9px] font-mono text-cyan-300">
+                {telemetry.timeLabel || 'SOLAR CYCLE'}
+              </span>
+            )}
+            <div className="text-[11px] uppercase tracking-[0.2em] text-amber-300/90 font-semibold group-hover:text-amber-200">
+              EXPLORE THE DRIFTING LANDS
+            </div>
           </div>
-          <div className="text-[10px] text-slate-300 font-mono mt-0.5">
+          <div className="text-[10px] text-slate-300 group-hover:text-cyan-200 font-mono mt-0.5">
             {progress.resonanceDiscovered
               ? 'TRANSIT CORRIDOR SYNCHRONIZED · PROCEED TO SECTOR 9'
               : `SURVEY TELEMETRY BEACONS [${progress.activatedAnchors.length}/3]`}
@@ -240,6 +259,25 @@ export const HUD: React.FC<HUDProps> = ({
 
         {/* Action icons */}
         <div className="flex items-center gap-1.5">
+          <button
+            onClick={onToggleCamera}
+            className="px-2.5 py-1.5 rounded bg-black/60 hover:bg-slate-800 text-teal-300 border border-white/20 backdrop-blur-md cursor-pointer transition-colors flex items-center gap-1 text-[10px] font-mono"
+            title="Toggle Perspective (First-Person / Third-Person / Second-Person)"
+          >
+            <Video className="w-3.5 h-3.5" />
+            <span className="uppercase">
+              {player.cameraMode === 'first_person' ? '1ST' : player.cameraMode === 'second_person' ? '2ND' : '3RD'}
+            </span>
+          </button>
+          {onOpenQuests && (
+            <button
+              onClick={onOpenQuests}
+              className="p-2 rounded bg-black/60 hover:bg-slate-800 text-amber-300 border border-white/20 backdrop-blur-md cursor-pointer transition-colors"
+              title="Quests & Missions"
+            >
+              <Target className="w-4 h-4" />
+            </button>
+          )}
           <button
             onClick={onOpenJournal}
             className="p-2 rounded bg-black/60 hover:bg-slate-800 text-cyan-300 border border-white/20 backdrop-blur-md cursor-pointer transition-colors"

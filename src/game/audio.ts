@@ -403,6 +403,107 @@ class SoundSystem {
   }
 
   /**
+   * Checkpoint synchronization tone: Ascending harmonious chime
+   */
+  public playCheckpointActivated() {
+    if (!this.ctx || !this.sfxGain || this.isMuted) return;
+
+    try {
+      const now = this.ctx.currentTime;
+      const freqs = [329.63, 440.0, 554.37, 659.25, 880.0]; // E4, A4, C#5, E5, A5
+
+      freqs.forEach((freq, idx) => {
+        if (!this.ctx || !this.sfxGain) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+
+        osc.type = 'triangle';
+        const start = now + idx * 0.08;
+        const duration = 1.6;
+
+        osc.frequency.setValueAtTime(freq, start);
+
+        gain.gain.setValueAtTime(0.001, start);
+        gain.gain.linearRampToValueAtTime(0.14 * this.sfxVolume, start + 0.04);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+
+        osc.connect(gain);
+        gain.connect(this.sfxGain);
+
+        osc.start(start);
+        osc.stop(start + duration + 0.05);
+      });
+    } catch {
+      // Audio error ignored
+    }
+  }
+
+  /**
+   * Harvest resource tone: Crisp high crystal ping
+   */
+  public playHarvestTone() {
+    if (!this.ctx || !this.sfxGain || this.isMuted) return;
+
+    try {
+      const now = this.ctx.currentTime;
+      const freqs = [659.25, 987.77, 1318.51]; // E5, B5, E6
+
+      freqs.forEach((freq, idx) => {
+        if (!this.ctx || !this.sfxGain) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+
+        osc.type = 'sine';
+        const start = now + idx * 0.04;
+        const duration = 0.6;
+
+        osc.frequency.setValueAtTime(freq, start);
+
+        gain.gain.setValueAtTime(0.001, start);
+        gain.gain.linearRampToValueAtTime(0.1 * this.sfxVolume, start + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+
+        osc.connect(gain);
+        gain.connect(this.sfxGain);
+
+        osc.start(start);
+        osc.stop(start + duration + 0.05);
+      });
+    } catch {
+      // Audio error ignored
+    }
+  }
+
+  /**
+   * Dialogue interaction beep
+   */
+  public playDialogueBeep() {
+    if (!this.ctx || !this.sfxGain || this.isMuted) return;
+
+    try {
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(587.33, now); // D5
+      osc.frequency.exponentialRampToValueAtTime(880.0, now + 0.08); // A5
+
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.linearRampToValueAtTime(0.08 * this.sfxVolume, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
+
+      osc.connect(gain);
+      gain.connect(this.sfxGain);
+
+      osc.start(now);
+      osc.stop(now + 0.2);
+    } catch {
+      // Audio error ignored
+    }
+  }
+
+  /**
    * Respawn tone when falling into the misty void
    */
   public playRespawnTone() {

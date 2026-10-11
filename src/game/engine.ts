@@ -131,9 +131,10 @@ export class GameEngine {
     this.world.buildWorld();
     this.scene.updateMatrixWorld(true);
 
-    // 2. Player (Third Person ONLY) safely spawned at platform floor height y = 4.2
+    // 2. Player safely spawned at platform floor height y = 4.2 with settings cameraMode
     this.player = new PlayerController(this.scene, [0, 4.2, 0]);
     this.player.setSensitivity(this.settings.sensitivity);
+    this.player.setCameraMode(this.settings.cameraMode || 'third_person');
     this.player.walkableMeshes = this.world.walkableMeshes;
 
     // 3. Threads
@@ -194,9 +195,21 @@ export class GameEngine {
       // 2. Update player physics and first-person camera
       this.player.update(delta);
 
-      // Emit telemetry (heading, elevation, temperature) for HUD
+      // Emit telemetry (heading, elevation, temperature, day/night cycle, red moon) for HUD
       if (this.onTelemetryUpdate) {
-        this.onTelemetryUpdate(this.player.getTelemetry());
+        const baseTelemetry = this.player.getTelemetry();
+        const timeLabels: Record<string, string> = {
+          day: 'SOLAR CYCLE: MIDDAY',
+          sunset: 'SOLAR CYCLE: AMBER TWILIGHT',
+          night: 'SOLAR CYCLE: CELESTIAL NIGHT',
+          red_moon: 'PHENOMENON: RED MOON ECLIPSE',
+        };
+
+        this.onTelemetryUpdate({
+          ...baseTelemetry,
+          timeOfDay: this.world.timeOfDay,
+          timeLabel: timeLabels[this.world.timeOfDay] || 'SOLAR CYCLE: NORMAL',
+        });
       }
 
       // Notify UI of respawn fade overlay

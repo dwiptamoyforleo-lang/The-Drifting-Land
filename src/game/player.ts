@@ -10,7 +10,7 @@
  */
 import * as THREE from 'three';
 import { soundSystem } from './audio';
-import { TelemetryData } from './types';
+import { TelemetryData, CameraMode } from './types';
 
 export interface PlayerInput {
   moveForward: number; // -1 to 1
@@ -30,8 +30,9 @@ export class PlayerController {
   public pitch: number = 0.25; // camera orbit vertical angle
   public isGrounded: boolean = true;
   public lastCheckpoint: THREE.Vector3;
+  public cameraMode: CameraMode = 'third_person';
 
-  // Third-person camera settings
+  // Camera settings
   private cameraDistance: number = 4.2;
   private cameraTargetHeight: number = 1.5;
   private currentCameraPos: THREE.Vector3 = new THREE.Vector3();
@@ -220,6 +221,21 @@ export class PlayerController {
     this.sensitivity = Math.max(0.4, Math.min(3.0, s));
   }
 
+  public setCameraMode(mode: CameraMode) {
+    this.cameraMode = mode;
+    if (this.characterGroup) {
+      // In first-person mode, hide head/torso meshes so player's sightline is clear, keep arms/compass
+      this.characterGroup.visible = mode !== 'first_person';
+    }
+  }
+
+  public toggleCameraMode(): CameraMode {
+    const modes: CameraMode[] = ['third_person', 'first_person', 'second_person'];
+    const nextIdx = (modes.indexOf(this.cameraMode) + 1) % modes.length;
+    this.setCameraMode(modes[nextIdx]);
+    return this.cameraMode;
+  }
+
   public applyLookDelta(deltaX: number, deltaY: number, isTouch: boolean = false) {
     const factor = isTouch ? 0.0035 * this.sensitivity : 0.0022 * this.sensitivity;
 
@@ -401,9 +417,53 @@ export class PlayerController {
   }
 
   /**
-   * Updates the Third-Person Camera trailing behind the character.
+   * Updates Camera based on selected CameraMode:
+   * - third_person: Orbiting trailing behind the character with smooth follow
+   * - first_person: Direct eye-level viewport through the explorer visor
+   * - second_person: Dramatic cinematic reverse perspective looking back at the character from front-angle
    */
   private updateCamera(dt: number) {
+    if (this.cameraMode === 'first_person') {
+      // First person eye level at 1.55m
+      const eyePos = new THREE.Vector3(
+        this.position.x,
+        this.position.y + 1.55,
+        this.position.z
+      );
+      this.camera.position.copy(eyePos);
+
+      // Look direction from yaw and pitch
+      const cosPitch = Math.cos(this.pitch);
+      const lookTarget = new THREE.Vector3(
+        eyePos.x - Math.sin(this.yaw) * cosPitch,
+        eyePos.y + Math.sin(this.pitch),
+        eyePos.z - Math.cos(this.yaw) * cosPitch
+      );
+      this.camera.lookAt(lookTarget);
+      return;
+    }
+
+    if (this.cameraMode === 'second_person') {
+      // Second person: Cinematic reverse angle looking *at* the player character from the front
+      const frontDist = 3.8;
+      const target = new THREE.Vector3(
+        this.position.x,
+        this.position.y + 1.35,
+        this.position.z
+      );
+      // Place camera in front of player character
+      const frontX = this.position.x - Math.sin(this.yaw) * frontDist;
+      const frontY = this.position.y + 1.8 + Math.sin(this.pitch) * 1.5;
+      const frontZ = this.position.z - Math.cos(this.yaw) * frontDist;
+
+      const desiredPos = new THREE.Vector3(frontX, frontY, frontZ);
+      this.currentCameraPos.lerp(desiredPos, Math.min(1.0, 14.0 * dt));
+      this.camera.position.copy(this.currentCameraPos);
+      this.camera.lookAt(target);
+      return;
+    }
+
+    // Default: Third-person orbit
     const target = new THREE.Vector3(
       this.position.x,
       this.position.y + this.cameraTargetHeight,

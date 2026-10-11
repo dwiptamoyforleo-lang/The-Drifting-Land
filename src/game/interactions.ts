@@ -7,12 +7,13 @@ import * as THREE from 'three';
 import { WorldManager } from './world';
 import { ThreadManager } from './threads';
 import { PlayerController } from './player';
-import { InteractableObject } from './types';
+import { InteractableObject, DialogueNode, HarvestableResource, WorldCheckpoint } from './types';
 import { soundSystem } from './audio';
 
 export interface InteractionState {
   currentPrompt: InteractableObject | null;
   activeInscription: { title: string; text: string } | null;
+  activeDialogue: DialogueNode | null;
   bannerToast: { title: string; subtitle: string; icon?: string } | null;
 }
 
@@ -29,10 +30,14 @@ export class InteractionManager {
   public onAnchorAttuned?: (anchorId: string) => void;
   public onFragmentFound?: (fragmentId: string) => void;
   public onResonanceUnlocked?: () => void;
+  public onNpcTalk?: (dialogue: DialogueNode) => void;
+  public onResourceHarvested?: (resource: HarvestableResource) => void;
+  public onCheckpointActivated?: (checkpoint: WorldCheckpoint) => void;
 
   private bannerTimer: number = 0;
   private currentBanner: { title: string; subtitle: string; icon?: string } | null = null;
   private activeInscription: { title: string; text: string } | null = null;
+  private activeDialogue: DialogueNode | null = null;
 
   constructor(world: WorldManager, threads: ThreadManager, player: PlayerController) {
     this.world = world;
@@ -55,7 +60,62 @@ export class InteractionManager {
     let closestTarget: InteractableObject | null = null;
     let minDistance = this.interactionRange;
 
-    // 1. Anchors
+    // 1. Checkpoints
+    this.world.checkpoints.forEach(cp => {
+      const cpPos = new THREE.Vector3(...cp.position);
+      const dist = playerPos.distanceTo(cpPos);
+      if (dist < minDistance) {
+        minDistance = dist;
+        closestTarget = {
+          id: cp.id,
+          type: 'checkpoint',
+          title: cp.name,
+          prompt: cp.activated ? 'Checkpoint Active' : `Activate ${cp.name}`,
+          distance: dist,
+          position: cpPos,
+          onInteract: () => this.handleCheckpointInteract(cp.id),
+        };
+      }
+    });
+
+    // 2. NPCs / Survivors
+    this.world.npcs.forEach(npc => {
+      const npcPos = new THREE.Vector3(...npc.position);
+      const dist = playerPos.distanceTo(npcPos);
+      if (dist < minDistance) {
+        minDistance = dist;
+        closestTarget = {
+          id: npc.id,
+          type: 'npc',
+          title: npc.name,
+          prompt: `Speak with ${npc.name}`,
+          distance: dist,
+          position: npcPos,
+          onInteract: () => this.handleNpcInteract(npc.id),
+        };
+      }
+    });
+
+    // 3. Harvestable Resources
+    this.world.resources.forEach(res => {
+      if (res.collected) return;
+      const resPos = new THREE.Vector3(...res.position);
+      const dist = playerPos.distanceTo(resPos);
+      if (dist < minDistance) {
+        minDistance = dist;
+        closestTarget = {
+          id: res.id,
+          type: 'resource',
+          title: res.name,
+          prompt: `Harvest ${res.name} (+${res.coinValue}c)`,
+          distance: dist,
+          position: resPos,
+          onInteract: () => this.handleResourceInteract(res.id),
+        };
+      }
+    });
+
+    // 4. Anchors
     this.world.anchors.forEach(anchor => {
       const anchorPos = new THREE.Vector3(...anchor.position);
       const dist = playerPos.distanceTo(anchorPos);
@@ -73,7 +133,7 @@ export class InteractionManager {
       }
     });
 
-    // 2. World Fragments
+    // 5. World Fragments
     this.world.fragments.forEach(frag => {
       if (frag.collected) return;
       const fragPos = new THREE.Vector3(...frag.position);
@@ -92,7 +152,7 @@ export class InteractionManager {
       }
     });
 
-    // 3. Inscription Steles
+    // 6. Inscription Steles
     this.world.inscriptions.forEach(insc => {
       const inscPos = new THREE.Vector3(...insc.position);
       const dist = playerPos.distanceTo(inscPos);
@@ -125,6 +185,65 @@ export class InteractionManager {
 
   public closeInscription() {
     this.activeInscription = null;
+    this.emitState();
+  }
+
+  public closeDialogue() {
+    this.activeDialogue = null;
+    this.emitState();
+  }
+
+  private handleCheckpointInteract(checkpointId: string) {
+    const cp = this.world.checkpoints.find(c => c.id === checkpointId);
+    if (!cp) return;
+
+    cp.activated = true;
+    this.player.setCheckpoint(new THREE.Vector3(...cp.position));
+    soundSystem.playCheckpointActivated();
+
+    if (cp.light) {
+      cp.light.color.setHex(0x38bdf8);
+      cp.light.intensity = 4.0;
+    }
+
+    this.showToast('CHECKPOINT SYNCHRONIZED', `${cp.name} is now your active recall matrix.`, 4.0);
+
+    if (this.onCheckpointActivated) {
+      this.onCheckpointActivated(cp);
+    }
+
+    this.emitState();
+  }
+
+  private handleResourceInteract(resourceId: string) {
+    const res = this.world.resources.find(r => r.id === resourceId);
+    if (!res || res.collected) return;
+
+    res.collected = true;
+    if (res.mesh) {
+      res.mesh.visible = false;
+    }
+
+    soundSystem.playHarvestTone();
+    this.showToast('RESOURCE HARVESTED', `Acquired ${res.name} (+${res.coinValue} Coins, +${res.xpValue} XP)`);
+
+    if (this.onResourceHarvested) {
+      this.onResourceHarvested(res);
+    }
+
+    this.currentTarget = null;
+    this.emitState();
+  }
+
+  private handleNpcInteract(npcId: string) {
+    const npc = this.world.npcs.find(n => n.id === npcId);
+    if (!npc) return;
+
+    soundSystem.playDialogueBeep();
+    this.activeDialogue = npc.dialogue;
+    if (this.onNpcTalk) {
+      this.onNpcTalk(npc.dialogue);
+    }
     this.emitState();
   }
 
@@ -214,6 +333,7 @@ export class InteractionManager {
       this.onStateChange({
         currentPrompt: this.currentTarget,
         activeInscription: this.activeInscription,
+        activeDialogue: this.activeDialogue,
         bannerToast: this.currentBanner,
       });
     }

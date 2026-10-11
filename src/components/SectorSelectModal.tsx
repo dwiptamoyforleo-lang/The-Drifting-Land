@@ -34,30 +34,81 @@ interface SectorSelectModalProps {
 export const SECTORS: SectorInfo[] = [
   {
     id: 1,
-    name: 'Sector 01: Observation Deck',
-    subtitle: 'Primary Telemetry Hub & Central Citadel',
-    description: 'High-altitude catwalk overlooking the golden cloud sea and the colossal turquoise gas giant. Features the primary telemetry terminal and bridge approach.',
+    name: 'The Verdant Reach',
+    subtitle: 'Primary Telemetry Hub & Ancient Observation Deck',
+    description: 'High-altitude catwalk and starter region overlooking the golden cloud sea and the colossal turquoise gas giant. Features ancient technology terminals, wildlife, and the first quantum anchor.',
     altitudeMeters: 1420,
     difficulty: 'Standard',
+    recommendedLevel: 1,
+    discoveries: ['Anchor Alpha', 'Data Core: Genesis Orbit', 'Aetheric Field Compass'],
+    creaturesAndHazards: 'Friendly Aerowisps, High-altitude wind shears',
+    completionPercentage: 85,
     spawnPoint: [0, 4.2, 0],
   },
   {
     id: 2,
-    name: 'Sector 02: Sky-Bridge Transit',
-    subtitle: 'Elevated Corridor & Flying Speeders',
-    description: 'Narrow transit gantry suspended above the amber cloud abyss. Watch aerial speeders navigate the flight corridors and calibrate Anchor Beta.',
+    name: 'The Shattered Highlands',
+    subtitle: 'Broken Cliffs, Drifting Islands & Transit Gantry',
+    description: 'Suspended sky-bridges and drifting fragmented islands with powerful wind currents, hovering speeders, and Anchor Beta.',
     altitudeMeters: 1680,
     difficulty: 'Advanced',
+    recommendedLevel: 2,
+    discoveries: ['Anchor Beta', 'Transit Flight Routing Logs', 'Drifting Monoliths'],
+    creaturesAndHazards: 'Majestic Sky Rays, Narrow catwalk abysses',
+    completionPercentage: 60,
     spawnPoint: [0, 4.2, -26],
   },
   {
     id: 3,
-    name: 'Sector 03: Geodesic Stratosphere',
-    subtitle: 'Research Dome & Quantum Core',
-    description: 'High-altitude crystalline research dome crowning the eastern towers. Final vertex of the quantum anchor network.',
+    name: 'The Ashen Expanse',
+    subtitle: 'Volcanic Sky-Islands & Thermal Updrafts',
+    description: 'Heated atmospheric pocket containing heat-resistant minerals, ancient geothermal vents, and shimmering sulfur crystals.',
+    altitudeMeters: 1950,
+    difficulty: 'Advanced',
+    recommendedLevel: 3,
+    discoveries: ['Thermal Core Geodes', 'Obsidian Conduit Relics', 'Heat Shields'],
+    creaturesAndHazards: 'Pyro-Wisps, Intense thermal turbulence',
+    completionPercentage: 40,
+    spawnPoint: [-12, 4.2, -35],
+  },
+  {
+    id: 4,
+    name: 'The Sunken Archive',
+    subtitle: 'Geodesic Research Dome & Forgotten Technology',
+    description: 'Crystalline research biosphere housing lost archives, harmonic resonators, and cryptographic deciphering stations.',
     altitudeMeters: 2100,
     difficulty: 'Extreme',
+    recommendedLevel: 4,
+    discoveries: ['Anchor Gamma', 'Quantum Core Cipher', 'Ancestral Records'],
+    creaturesAndHazards: 'Dormant Sentinel Drones, Quantum static',
+    completionPercentage: 50,
     spawnPoint: [22, 4.2, -34],
+  },
+  {
+    id: 5,
+    name: 'The Moonveil Wilds',
+    subtitle: 'Bioluminescent Canopy & Night Phenomenon',
+    description: 'Mysterious atmospheric grove where glowing flora thrives and celestial night phenomena including the Red Moon are prominent.',
+    altitudeMeters: 1540,
+    difficulty: 'Advanced',
+    recommendedLevel: 3,
+    discoveries: ['Moonveil Petals', 'Bioluminescent Spores', 'Lunar Dial'],
+    creaturesAndHazards: 'Luminescent Wisps, Red Moon surges',
+    completionPercentage: 30,
+    spawnPoint: [6, 4.2, -18],
+  },
+  {
+    id: 6,
+    name: 'The Rift Frontier',
+    subtitle: 'Unstable Dimensional Anomaly & Spatial Portals',
+    description: 'Boundary zone of fractured spacetime where reality fluctuates, connecting distant dimensions through humming spatial tears.',
+    altitudeMeters: 2450,
+    difficulty: 'Extreme',
+    recommendedLevel: 5,
+    discoveries: ['Rift Keystone', 'Singularity Core', 'Dimensional Fragment'],
+    creaturesAndHazards: 'Spatial Rifts, High gravity fluctuations',
+    completionPercentage: 15,
+    spawnPoint: [-20, 4.2, -45],
   },
 ];
 
@@ -255,6 +306,9 @@ export const SectorSelectModal: React.FC<SectorSelectModalProps> = ({
                         <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-cyan-300">
                           {sector.altitudeMeters}m ALT
                         </span>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-amber-300">
+                          REC LVL {sector.recommendedLevel}
+                        </span>
                       </div>
                       <div className="text-xs text-amber-300/90 font-mono mt-0.5">
                         {sector.subtitle}
@@ -262,6 +316,16 @@ export const SectorSelectModal: React.FC<SectorSelectModalProps> = ({
                       <p className="text-[11px] text-slate-400 font-sans mt-1.5 leading-relaxed">
                         {sector.description}
                       </p>
+
+                      {/* Discoveries & Hazards */}
+                      <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex flex-wrap gap-x-4 gap-y-1 text-[10px]">
+                        <span className="text-cyan-300">
+                          <strong>Discoveries:</strong> {sector.discoveries.join(', ')}
+                        </span>
+                        <span className="text-rose-300/90">
+                          <strong>Hazards:</strong> {sector.creaturesAndHazards}
+                        </span>
+                      </div>
                     </div>
 
                     <div className="text-right flex flex-col items-end gap-1">

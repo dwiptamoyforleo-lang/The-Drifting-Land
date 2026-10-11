@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { X, Sliders, Volume2, VolumeX, Eye, RotateCcw, Check, Sparkles } from 'lucide-react';
-import { GameSettings, GraphicsQuality } from '../game/types';
+import { X, Sliders, Volume2, VolumeX, Eye, RotateCcw, Check, Sparkles, Video } from 'lucide-react';
+import { GameSettings, GraphicsQuality, CameraMode } from '../game/types';
 import { soundSystem } from '../game/audio';
 
 interface SettingsModalProps {
@@ -22,6 +22,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const setQuality = (q: GraphicsQuality) => {
     onUpdateSettings({ ...settings, graphicsQuality: q });
+  };
+
+  const setCameraMode = (mode: CameraMode) => {
+    onUpdateSettings({ ...settings, cameraMode: mode });
   };
 
   const handleSensitivityChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -108,6 +112,36 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <p className="mt-2 text-[11px] text-slate-400 italic">
               Balanced is optimized for Android phones with smooth lighting and controlled resolution scaling.
             </p>
+          </div>
+
+          {/* Camera Perspective Mode */}
+          <div>
+            <label className="block text-xs uppercase tracking-wider text-slate-400 font-semibold mb-2.5">
+              Camera Perspective Mode
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { id: 'third_person' as CameraMode, label: 'Third-Person', sub: 'Orbital Follow' },
+                { id: 'first_person' as CameraMode, label: 'First-Person', sub: 'Visor Direct' },
+                { id: 'second_person' as CameraMode, label: 'Second-Person', sub: 'Cinematic Front' },
+              ].map((c) => {
+                const isActive = (settings.cameraMode || 'third_person') === c.id;
+                return (
+                  <button
+                    key={c.id}
+                    onClick={() => setCameraMode(c.id)}
+                    className={`py-2.5 px-2 rounded-xl border text-center transition-all flex flex-col items-center justify-center gap-0.5 cursor-pointer ${
+                      isActive
+                        ? 'bg-cyan-950/70 border-cyan-400 text-cyan-200 shadow-[0_0_12px_rgba(6,182,212,0.3)]'
+                        : 'bg-slate-950/40 border-slate-800 text-slate-400 hover:bg-slate-800/40'
+                    }`}
+                  >
+                    <span className="text-xs font-bold">{c.label}</span>
+                    <span className="text-[10px] text-slate-400 font-mono">{c.sub}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* Camera Look Sensitivity */}

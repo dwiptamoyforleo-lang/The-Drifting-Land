@@ -11,8 +11,9 @@ export const DEFAULT_USER_PROFILE: UserProfile = {
   username: 'Aero_Vanguard',
   xp: 1850,
   level: 4,
+  coins: 420,
   selectedSector: 1,
-  unlockedSectors: [1, 2, 3],
+  unlockedSectors: [1, 2, 3, 4, 5, 6],
 };
 
 export const DEFAULT_SETTINGS: GameSettings = {
@@ -22,6 +23,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   ambientVolume: 0.7,
   sfxVolume: 0.85,
   showFps: false,
+  cameraMode: 'third_person',
 };
 
 export const INITIAL_PROGRESS: GameProgress = {
@@ -30,6 +32,40 @@ export const INITIAL_PROGRESS: GameProgress = {
   resonanceDiscovered: false,
   citadelExplored: false,
   lastCheckpoint: [0, 4.2, 0],
+  activatedCheckpoints: [],
+  collectedResources: [],
+  coins: 420,
+  inventory: [
+    {
+      id: 'item-compass',
+      name: 'Aetheric Field Compass',
+      description: 'Precision celestial instrument calibrated to detect magnetic anomalies and drifting anchors.',
+      category: 'artifact',
+      quantity: 1,
+      valueCoins: 120,
+      icon: 'compass',
+    },
+    {
+      id: 'item-repair-gel',
+      name: 'Aerosol Nanite Gel',
+      description: 'Pressurized sealant used to restore explorer suit integrity and calibrate machinery.',
+      category: 'consumable',
+      quantity: 3,
+      valueCoins: 45,
+      icon: 'shield',
+    },
+    {
+      id: 'item-celestial-shard',
+      name: 'Celestine Shard',
+      description: 'Vibrant turquoise crystal harvested from high-altitude drifting landmasses.',
+      category: 'material',
+      quantity: 5,
+      valueCoins: 60,
+      icon: 'gem',
+    },
+  ],
+  completedQuests: [],
+  redMoonWitnessed: false,
 };
 
 export function loadSettings(): GameSettings {
