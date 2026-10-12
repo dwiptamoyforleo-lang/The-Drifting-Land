@@ -32,6 +32,10 @@ export class GameEngine {
   private frameCount: number = 0;
   private fpsTimer: number = 0;
 
+  // HUD state changes are deliberately decoupled from the per-frame 3D render loop.
+  private telemetryTimer: number = 0;
+  private interactionTimer: number = 0;
+
   // Desktop keyboard state
   private activeKeys: Set<string> = new Set();
   private isPointerLocked: boolean = false;
@@ -195,21 +199,25 @@ export class GameEngine {
       // 2. Update player physics and first-person camera
       this.player.update(delta);
 
-      // Emit telemetry (heading, elevation, temperature, day/night cycle, red moon) for HUD
+      // Update HUD telemetry at 10 Hz instead of forcing a React render on every frame.
       if (this.onTelemetryUpdate) {
-        const baseTelemetry = this.player.getTelemetry();
-        const timeLabels: Record<string, string> = {
-          day: 'SOLAR CYCLE: MIDDAY',
-          sunset: 'SOLAR CYCLE: AMBER TWILIGHT',
-          night: 'SOLAR CYCLE: CELESTIAL NIGHT',
-          red_moon: 'PHENOMENON: RED MOON ECLIPSE',
-        };
+        this.telemetryTimer += delta;
+        if (this.telemetryTimer >= 0.1) {
+          this.telemetryTimer %= 0.1;
+          const baseTelemetry = this.player.getTelemetry();
+          const timeLabels: Record<string, string> = {
+            day: 'SOLAR CYCLE: MIDDAY',
+            sunset: 'SOLAR CYCLE: AMBER TWILIGHT',
+            night: 'SOLAR CYCLE: CELESTIAL NIGHT',
+            red_moon: 'PHENOMENON: RED MOON ECLIPSE',
+          };
 
-        this.onTelemetryUpdate({
-          ...baseTelemetry,
-          timeOfDay: this.world.timeOfDay,
-          timeLabel: timeLabels[this.world.timeOfDay] || 'SOLAR CYCLE: NORMAL',
-        });
+          this.onTelemetryUpdate({
+            ...baseTelemetry,
+            timeOfDay: this.world.timeOfDay,
+            timeLabel: timeLabels[this.world.timeOfDay] || 'SOLAR CYCLE: NORMAL',
+          });
+        }
       }
 
       // Notify UI of respawn fade overlay
@@ -223,8 +231,13 @@ export class GameEngine {
       // 4. Update threads & resonance
       this.threads.update(elapsedTime, delta);
 
-      // 5. Update interaction proximity checks
-      this.interactions.update(delta);
+      // 5. Scan interaction ranges at 10 Hz; movement and 3D animation remain frame-based.
+      this.interactionTimer += delta;
+      if (this.interactionTimer >= 0.1) {
+        const interactionDelta = this.interactionTimer;
+        this.interactionTimer %= 0.1;
+        this.interactions.update(interactionDelta);
+      }
     }
 
     // Render 3D Scene
