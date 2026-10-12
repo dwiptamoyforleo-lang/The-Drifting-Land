@@ -1,6 +1,7 @@
 /**
- * THE DRIFTING LAND — Main Application Root
- * Mobile-optimized Third-Person Sci-Fi Exploration Game
+ * THE DRIFTING LAND - Main Application Root
+ * Integrated with complete camera modes, keyboard shortcuts (V, Shift, F, M, Tab/I, J, Esc),
+ * and touchscreen mobile controls.
  */
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
@@ -16,7 +17,6 @@ import {
   WorldCheckpoint,
   DialogueNode,
   DialogueOption,
-  HarvestableResource,
   UserProfile,
 } from './game/types';
 import {
@@ -35,19 +35,19 @@ import { JournalModal } from './components/JournalModal';
 import { OrientationLockModal } from './components/OrientationLockModal';
 import { SectorSelectModal, SECTORS } from './components/SectorSelectModal';
 import { QuestsModal, INITIAL_QUESTS } from './components/QuestsModal';
-import { DimensionsModal, DIMENSIONS } from './components/DimensionsModal';
+import { DimensionsModal } from './components/DimensionsModal';
 import { InventoryModal } from './components/InventoryModal';
 import { ShopModal } from './components/ShopModal';
 import { CreditsModal } from './components/CreditsModal';
 import { LevelLoadingScreen } from './components/LevelLoadingScreen';
 import { DialogueModal } from './components/DialogueModal';
+import { MapModal } from './components/MapModal';
 import { soundSystem } from './game/audio';
 
 export default function App() {
   const containerRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
 
-  // High-level App State
   const [gameStarted, setGameStarted] = useState<boolean>(false);
   const [isPaused, setIsPaused] = useState<boolean>(false);
   const [showSettings, setShowSettings] = useState<boolean>(false);
@@ -58,22 +58,18 @@ export default function App() {
   const [showInventory, setShowInventory] = useState<boolean>(false);
   const [showShop, setShowShop] = useState<boolean>(false);
   const [showCredits, setShowCredits] = useState<boolean>(false);
-
-  // Loading Screen State
+  const [showMap, setShowMap] = useState<boolean>(false);
   const [isLoadingLevel, setIsLoadingLevel] = useState<boolean>(false);
   const [loadingDestination, setLoadingDestination] = useState<typeof SECTORS[0]>(SECTORS[0]);
 
-  // Quests & Dimensions State
   const [quests, setQuests] = useState<typeof INITIAL_QUESTS>(INITIAL_QUESTS);
   const [currentDimension, setCurrentDimension] = useState<number>(1);
   const [unlockedDimensions, setUnlockedDimensions] = useState<number[]>([1, 2, 3]);
 
-  // Settings, Progress & User Profile
   const [settings, setSettings] = useState<GameSettings>(loadSettings);
   const [progress, setProgress] = useState<GameProgress>(loadProgress);
   const [userProfile, setUserProfile] = useState<UserProfile>(loadUserProfile);
 
-  // In-Game Interaction & UI states
   const [currentPrompt, setCurrentPrompt] = useState<InteractableObject | null>(null);
   const [activeInscription, setActiveInscription] = useState<{ title: string; text: string } | null>(null);
   const [bannerToast, setBannerToast] = useState<{ title: string; subtitle: string; icon?: string } | null>(null);
@@ -87,21 +83,32 @@ export default function App() {
     timeLabel: 'SOLAR CYCLE: AMBER TWILIGHT',
   });
 
-  // References to world objects for Archive modal
   const [worldAnchors, setWorldAnchors] = useState<MagicalAnchor[]>([]);
   const [worldFragments, setWorldFragments] = useState<WorldFragment[]>([]);
   const [worldCheckpoints, setWorldCheckpoints] = useState<WorldCheckpoint[]>([]);
   const [activeDialogue, setActiveDialogue] = useState<DialogueNode | null>(null);
 
-  // Initialize Three.js Engine once on mount
+  const handleToggleCamera = useCallback(() => {
+    if (engineRef.current) {
+      const nextMode = engineRef.current.player.toggleCameraMode();
+      setSettings((prev) => {
+        const next = { ...prev, cameraMode: nextMode };
+        saveSettings(next);
+        return next;
+      });
+      engineRef.current.interactions.showToast(
+        'Perspective Shifted',
+        nextMode === 'first_person' ? '1st-Person Direct Visor' : nextMode === 'second_person' ? '2nd-Person Observer View' : '3rd-Person Orbital'
+      );
+    }
+  }, []);
+
   useEffect(() => {
     if (!containerRef.current) return;
-
     const initialSettings = loadSettings();
     const engine = new GameEngine(containerRef.current, initialSettings);
     engineRef.current = engine;
 
-    // Restore saved progress
     const saved = loadProgress();
     engine.restoreProgress(
       saved.activatedAnchors,
@@ -109,12 +116,15 @@ export default function App() {
       saved.resonanceDiscovered
     );
 
-    // Save references to anchor/fragment/checkpoint definitions for the journal
     setWorldAnchors([...engine.world.anchors]);
     setWorldFragments([...engine.world.fragments]);
     setWorldCheckpoints([...engine.world.checkpoints]);
 
-    // Setup Event Listeners from Engine
+    engine.onToggleCamera = handleToggleCamera;
+    engine.onOpenInventory = () => setShowInventory(true);
+    engine.onOpenQuests = () => setShowQuests(true);
+    engine.onOpenMap = () => setShowMap(true);
+
     engine.interactions.onStateChange = (state) => {
       setCurrentPrompt(state.currentPrompt);
       setActiveInscription(state.activeInscription);
@@ -131,8 +141,6 @@ export default function App() {
         saveProgress(next);
         return next;
       });
-
-      // Award +250 XP for attuning a quantum anchor!
       setUserProfile((prev) => {
         const newXp = prev.xp + 250;
         const newLevel = Math.floor(newXp / 800) + 1;
@@ -152,8 +160,6 @@ export default function App() {
         saveProgress(next);
         return next;
       });
-
-      // Award +100 XP for synchronizing recall checkpoint
       setUserProfile((prev) => {
         const newXp = prev.xp + 100;
         const newLevel = Math.floor(newXp / 800) + 1;
@@ -185,7 +191,6 @@ export default function App() {
         saveProgress(next);
         return next;
       });
-
       setUserProfile((prev) => {
         const newCoins = prev.coins + resource.coinValue;
         const newXp = prev.xp + resource.xpValue;
@@ -211,8 +216,6 @@ export default function App() {
         saveProgress(next);
         return next;
       });
-
-      // Award +150 XP for recovering an encrypted data core!
       setUserProfile((prev) => {
         const newXp = prev.xp + 150;
         const newLevel = Math.floor(newXp / 800) + 1;
@@ -228,8 +231,6 @@ export default function App() {
         saveProgress(next);
         return next;
       });
-
-      // Award +500 XP bonus for full resonance!
       setUserProfile((prev) => {
         const newXp = prev.xp + 500;
         const newLevel = Math.floor(newXp / 800) + 1;
@@ -255,19 +256,15 @@ export default function App() {
       engine.destroy();
       engineRef.current = null;
     };
-  }, []);
+  }, [handleToggleCamera]);
 
-  // Start exploration from Title Screen
   const handleStartGame = () => {
     setGameStarted(true);
     setShowSectorSelect(false);
-    if (engineRef.current) {
-      engineRef.current.resume();
-    }
+    if (engineRef.current) engineRef.current.resume();
     soundSystem.startAudio();
   };
 
-  // Launch into a chosen Sector with loading sequence
   const handleSelectSectorAndLaunch = (sectorId: number) => {
     const sector = SECTORS.find((s) => s.id === sectorId) || SECTORS[0];
     setLoadingDestination(sector);
@@ -287,50 +284,27 @@ export default function App() {
       engineRef.current.player.isGrounded = true;
       engineRef.current.player.setCheckpoint(new THREE.Vector3(...loadingDestination.spawnPoint));
     }
-
-    // Award +50 flight XP for deploying
     setUserProfile((prev) => {
       const updated = { ...prev, selectedSector: loadingDestination.id, xp: prev.xp + 50 };
       saveUserProfile(updated);
       return updated;
     });
-
     handleStartGame();
   };
 
-  // New Game
   const handleNewGame = () => {
     const cleared = clearProgress();
     setProgress(cleared);
     handleSelectSectorAndLaunch(1);
   };
 
-  // Toggle Camera Mode
-  const handleToggleCamera = useCallback(() => {
-    if (engineRef.current) {
-      const nextMode = engineRef.current.player.toggleCameraMode();
-      setSettings((prev) => {
-        const next = { ...prev, cameraMode: nextMode };
-        saveSettings(next);
-        return next;
-      });
-      engineRef.current.interactions.showToast(
-        'Perspective Shifted',
-        nextMode === 'first_person' ? '1st-Person Direct Visor' : nextMode === 'second_person' ? '2nd-Person Cinematic Reverse' : '3rd-Person Orbital'
-      );
-    }
-  }, []);
-
-  // Marketplace Buy Item
   const handleBuyItem = (item: any, cost: number) => {
     if ((userProfile.coins || 0) < cost) return;
-
     setUserProfile((prev) => {
       const next = { ...prev, coins: prev.coins - cost };
       saveUserProfile(next);
       return next;
     });
-
     setProgress((prev) => {
       const existing = prev.inventory.find((i) => i.id === item.id);
       let updatedInv;
@@ -343,54 +317,36 @@ export default function App() {
       saveProgress(nextProgress);
       return nextProgress;
     });
-
     soundSystem.playFragmentCollected();
   };
 
-  // Shift Dimension
   const handleSelectDimension = (dimId: number) => {
     setCurrentDimension(dimId);
     setShowDimensions(false);
     if (engineRef.current) {
       if (dimId === 3) {
-        // Red Moon Dimension
         engineRef.current.world.triggerRareRedMoonEvent();
-        engineRef.current.interactions.showToast(
-          'DIMENSIONAL RIFT OPENED',
-          'Kepler-94d enters celestial red moon alignment!'
-        );
+        engineRef.current.interactions.showToast('DIMENSIONAL RIFT OPENED', 'Kepler-94d enters celestial red moon alignment!');
       } else if (dimId === 2) {
-        // Quantum Aether
         engineRef.current.world.setTimeOfDay('night');
-        engineRef.current.interactions.showToast(
-          'QUANTUM AETHER',
-          'Gravitational matrix fluctuating. Anchors hyper-charged.'
-        );
+        engineRef.current.interactions.showToast('QUANTUM AETHER', 'Gravitational matrix fluctuating. Anchors hyper-charged.');
       } else {
         engineRef.current.world.setTimeOfDay('day');
-        engineRef.current.interactions.showToast(
-          'MATERIAL REALM',
-          'Returned to Kepler-94d primary stratosphere.'
-        );
+        engineRef.current.interactions.showToast('MATERIAL REALM', 'Returned to Kepler-94d primary stratosphere.');
       }
     }
   };
 
-  // Pause menu
   const handlePause = () => {
     setIsPaused(true);
     setShowSettings(true);
-    if (engineRef.current) {
-      engineRef.current.pause();
-    }
+    if (engineRef.current) engineRef.current.pause();
   };
 
   const handleResume = () => {
     setIsPaused(false);
     setShowSettings(false);
-    if (engineRef.current) {
-      engineRef.current.resume();
-    }
+    if (engineRef.current) engineRef.current.resume();
   };
 
   const handleReturnToTitle = () => {
@@ -400,16 +356,13 @@ export default function App() {
     setShowSectorSelect(false);
   };
 
-  // Settings updates
   const handleUpdateSettings = (newSettings: GameSettings) => {
     setSettings(newSettings);
     saveSettings(newSettings);
     if (engineRef.current) {
       engineRef.current.applyQualitySettings(newSettings.graphicsQuality);
       engineRef.current.setSensitivity(newSettings.sensitivity);
-      if (newSettings.cameraMode) {
-        engineRef.current.player.setCameraMode(newSettings.cameraMode);
-      }
+      if (newSettings.cameraMode) engineRef.current.player.setCameraMode(newSettings.cameraMode);
     }
   };
 
@@ -418,31 +371,23 @@ export default function App() {
     saveUserProfile(updatedProfile);
   };
 
-  // Reset Progress
   const handleResetProgress = () => {
     const cleared = clearProgress();
     setProgress(cleared);
     window.location.reload();
   };
 
-  // Contextual Interact trigger
   const handleTriggerInteract = useCallback(() => {
-    if (engineRef.current) {
-      engineRef.current.interactions.triggerCurrentInteract();
-    }
+    if (engineRef.current) engineRef.current.interactions.triggerCurrentInteract();
   }, []);
 
   const handleCloseInscription = useCallback(() => {
-    if (engineRef.current) {
-      engineRef.current.interactions.closeInscription();
-    }
+    if (engineRef.current) engineRef.current.interactions.closeInscription();
   }, []);
 
   const handleCloseDialogue = useCallback(() => {
     setActiveDialogue(null);
-    if (engineRef.current) {
-      engineRef.current.interactions.closeDialogue();
-    }
+    if (engineRef.current) engineRef.current.interactions.closeDialogue();
   }, []);
 
   const handleDialogueOptionSelect = useCallback((option: DialogueOption) => {
@@ -463,7 +408,6 @@ export default function App() {
     }
   }, []);
 
-  // Synchronize Quests with current exploration progress
   useEffect(() => {
     setQuests((prev) =>
       prev.map((q) => {
@@ -493,16 +437,12 @@ export default function App() {
 
   return (
     <div className="relative w-full h-full overflow-hidden bg-[#070b14] select-none touch-none">
-      {/* 0. Mandatory Orientation Lock Gate (Landscape Required) */}
       <OrientationLockModal />
-
-      {/* 3D WebGL Canvas Viewport */}
       <div
         ref={containerRef}
         className="absolute inset-0 w-full h-full block cursor-grab active:cursor-grabbing"
       />
 
-      {/* Dynamic Level Loading Screen */}
       {isLoadingLevel && (
         <LevelLoadingScreen
           destinationSector={loadingDestination}
@@ -510,7 +450,6 @@ export default function App() {
         />
       )}
 
-      {/* Title Screen (when exploration hasn't started and not selecting sector) */}
       {!gameStarted && !showSectorSelect && !isLoadingLevel && (
         <TitleScreen
           onStartGame={handleStartGame}
@@ -528,7 +467,6 @@ export default function App() {
         />
       )}
 
-      {/* Level / Sector Select Screen & User Profile (XP & Username) */}
       {showSectorSelect && !isLoadingLevel && (
         <SectorSelectModal
           userProfile={userProfile}
@@ -539,11 +477,11 @@ export default function App() {
         />
       )}
 
-      {/* In-Game HUD (when active) */}
       {gameStarted && engineRef.current && !isLoadingLevel && (
         <HUD
           player={engineRef.current.player}
           progress={progress}
+          settings={settings}
           currentPrompt={currentPrompt}
           activeInscription={activeInscription}
           bannerToast={bannerToast}
@@ -554,13 +492,14 @@ export default function App() {
           onPause={handlePause}
           onOpenJournal={() => setShowJournal(true)}
           onOpenQuests={() => setShowQuests(true)}
+          onOpenInventory={() => setShowInventory(true)}
+          onOpenMap={() => setShowMap(true)}
           onCloseInscription={handleCloseInscription}
           onInteract={handleTriggerInteract}
           onToggleCamera={handleToggleCamera}
         />
       )}
 
-      {/* Survivor & NPC Transmission Modal */}
       {activeDialogue && (
         <DialogueModal
           dialogue={activeDialogue}
@@ -569,7 +508,6 @@ export default function App() {
         />
       )}
 
-      {/* Dimensions Modal */}
       {showDimensions && (
         <DimensionsModal
           unlockedDimensions={unlockedDimensions}
@@ -579,7 +517,6 @@ export default function App() {
         />
       )}
 
-      {/* Quests Modal */}
       {showQuests && (
         <QuestsModal
           quests={quests}
@@ -587,7 +524,6 @@ export default function App() {
         />
       )}
 
-      {/* Inventory Modal */}
       {showInventory && (
         <InventoryModal
           inventory={progress.inventory || []}
@@ -596,7 +532,6 @@ export default function App() {
         />
       )}
 
-      {/* Shop Modal */}
       {showShop && (
         <ShopModal
           userProfile={userProfile}
@@ -606,14 +541,19 @@ export default function App() {
         />
       )}
 
-      {/* Credits Modal */}
+      {showMap && (
+        <MapModal
+          currentSectorId={userProfile.selectedSector || 1}
+          onClose={() => setShowMap(false)}
+        />
+      )}
+
       {showCredits && (
         <CreditsModal
           onClose={() => setShowCredits(false)}
         />
       )}
 
-      {/* Settings / Pause Modal */}
       {showSettings && (
         <SettingsModal
           settings={settings}
@@ -624,7 +564,6 @@ export default function App() {
         />
       )}
 
-      {/* Celestial Journal / Archive Modal */}
       {showJournal && (
         <JournalModal
           progress={progress}
