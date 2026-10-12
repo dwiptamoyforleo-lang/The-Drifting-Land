@@ -18,6 +18,10 @@ import {
   DialogueNode,
   DialogueOption,
   UserProfile,
+  PlayerStats,
+  EquipmentSlot,
+  CraftingRecipe,
+  InventoryItem,
 } from './game/types';
 import {
   loadProgress,
@@ -28,6 +32,7 @@ import {
   loadUserProfile,
   saveUserProfile,
 } from './game/storage';
+import { ITEM_DATABASE } from './game/itemDatabase';
 import { TitleScreen } from './components/TitleScreen';
 import { HUD } from './components/HUD';
 import { SettingsModal } from './components/SettingsModal';
@@ -37,6 +42,7 @@ import { SectorSelectModal, SECTORS } from './components/SectorSelectModal';
 import { QuestsModal, INITIAL_QUESTS } from './components/QuestsModal';
 import { DimensionsModal } from './components/DimensionsModal';
 import { InventoryModal } from './components/InventoryModal';
+import { CraftingModal } from './components/CraftingModal';
 import { ShopModal } from './components/ShopModal';
 import { CreditsModal } from './components/CreditsModal';
 import { LevelLoadingScreen } from './components/LevelLoadingScreen';
@@ -56,11 +62,15 @@ export default function App() {
   const [showDimensions, setShowDimensions] = useState<boolean>(false);
   const [showQuests, setShowQuests] = useState<boolean>(false);
   const [showInventory, setShowInventory] = useState<boolean>(false);
+  const [showCrafting, setShowCrafting] = useState<boolean>(false);
   const [showShop, setShowShop] = useState<boolean>(false);
   const [showCredits, setShowCredits] = useState<boolean>(false);
   const [showMap, setShowMap] = useState<boolean>(false);
   const [isLoadingLevel, setIsLoadingLevel] = useState<boolean>(false);
   const [loadingDestination, setLoadingDestination] = useState<typeof SECTORS[0]>(SECTORS[0]);
+
+  const [playerStats, setPlayerStats] = useState<PlayerStats | undefined>(undefined);
+  const [damageAlpha, setDamageAlpha] = useState<number>(0);
 
   const [quests, setQuests] = useState<typeof INITIAL_QUESTS>(INITIAL_QUESTS);
   const [currentDimension, setCurrentDimension] = useState<number>(1);
@@ -87,6 +97,206 @@ export default function App() {
   const [worldFragments, setWorldFragments] = useState<WorldFragment[]>([]);
   const [worldCheckpoints, setWorldCheckpoints] = useState<WorldCheckpoint[]>([]);
   const [activeDialogue, setActiveDialogue] = useState<DialogueNode | null>(null);
+
+  const handleHotbarUseRef = useRef<(slotIndex: number) => void>(() => {});
+
+  // Damage vignette decay effect
+  useEffect(() => {
+    if (damageAlpha <= 0) return;
+    const timer = setInterval(() => {
+      setDamageAlpha((prev) => Math.max(0, prev - 0.08));
+    }, 40);
+    return () => clearInterval(timer);
+  }, [damageAlpha]);
+
+  const applyEquipmentStatsToPlayer = useCallback(
+    (equippedSlots: Record<EquipmentSlot, string | null>, currentInv: InventoryItem[]) => {
+      if (!engineRef.current) return;
+      const statsList = Object.values(equippedSlots)
+        .filter((id): id is string => Boolean(id))
+        .map((id) => currentInv.find((i) => i.id === id)?.stats);
+      engineRef.current.player.applyEquipmentStats(statsList);
+    },
+    []
+  );
+
+  const handleUseItem = useCallback(
+    (itemId: string) => {
+      const item = (progress.inventory || []).find((i) => i.id === itemId);
+      if (!item) return;
+
+      if (engineRef.current) {
+        if (item.healAmount) {
+          engineRef.current.player.heal(item.healAmount);
+        }
+        if (item.staminaAmount) {
+          engineRef.current.player.restoreStamina(item.staminaAmount);
+        }
+        engineRef.current.interactions.showToast(
+          'ITEM CONSUMED',
+          `Used ${item.name}. ${item.healAmount ? `+${item.healAmount} HP ` : ''}${
+            item.staminaAmount ? `+${item.staminaAmount} Stamina` : ''
+          }`
+        );
+      }
+
+      setProgress((prev) => {
+        const updatedInv = prev.inventory
+          .map((i) => (i.id === itemId ? { ...i, quantity: i.quantity - 1 } : i))
+          .filter((i) => i.quantity > 0);
+        const next = { ...prev, inventory: updatedInv };
+        saveProgress(next);
+        return next;
+      });
+    },
+    [progress.inventory]
+  );
+
+  const handleEquipItem = useCallback(
+    (itemId: string, slot: EquipmentSlot) => {
+      const item = (progress.inventory || []).find((i) => i.id === itemId);
+      if (!item) return;
+
+      setProgress((prev) => {
+        const nextEquipped = {
+          ...(prev.equipped || {}),
+          [slot]: itemId,
+        };
+        applyEquipmentStatsToPlayer(nextEquipped as Record<EquipmentSlot, string | null>, prev.inventory);
+        const next = { ...prev, equipped: nextEquipped };
+        saveProgress(next);
+        return next;
+      });
+
+      if (engineRef.current) {
+        engineRef.current.interactions.showToast(
+          'EQUIPMENT LOADED',
+          `Equipped ${item.name} to [${slot.toUpperCase()}]`
+        );
+      }
+    },
+    [progress.inventory, applyEquipmentStatsToPlayer]
+  );
+
+  const handleUnequipItem = useCallback(
+    (slot: EquipmentSlot) => {
+      setProgress((prev) => {
+        const nextEquipped = {
+          ...(prev.equipped || {}),
+          [slot]: null,
+        };
+        applyEquipmentStatsToPlayer(nextEquipped as Record<EquipmentSlot, string | null>, prev.inventory);
+        const next = { ...prev, equipped: nextEquipped };
+        saveProgress(next);
+        return next;
+      });
+
+      if (engineRef.current) {
+        engineRef.current.interactions.showToast('EQUIPMENT REMOVED', `Unequipped ${slot} gear.`);
+      }
+    },
+    [progress.inventory, applyEquipmentStatsToPlayer]
+  );
+
+  const handleAssignHotbar = useCallback((itemId: string, slotIndex: number) => {
+    setProgress((prev) => {
+      const nextHotbar = [...(prev.hotbar || [null, null, null, null, null, null])];
+      nextHotbar[slotIndex] = itemId;
+      const next = { ...prev, hotbar: nextHotbar };
+      saveProgress(next);
+      return next;
+    });
+  }, []);
+
+  const handleHotbarUse = useCallback(
+    (slotIndex: number) => {
+      const itemId = (progress.hotbar || [])[slotIndex];
+      if (!itemId) {
+        if (engineRef.current) {
+          engineRef.current.interactions.showToast('EMPTY HOTBAR SLOT', `Slot [${slotIndex + 1}] has no item assigned.`);
+        }
+        return;
+      }
+      const item = (progress.inventory || []).find((i) => i.id === itemId);
+      if (!item) return;
+
+      if (item.healAmount || item.staminaAmount || item.category === 'food_recovery' || item.category === 'consumable') {
+        handleUseItem(item.id);
+      } else if (item.equipmentSlot) {
+        const isEquipped = (progress.equipped as Record<EquipmentSlot, string | null>)?.[item.equipmentSlot] === item.id;
+        if (isEquipped) {
+          handleUnequipItem(item.equipmentSlot);
+        } else {
+          handleEquipItem(item.id, item.equipmentSlot);
+        }
+      } else {
+        if (engineRef.current) {
+          engineRef.current.interactions.showToast(item.name, item.description);
+        }
+      }
+    },
+    [progress.hotbar, progress.inventory, progress.equipped, handleUseItem, handleEquipItem, handleUnequipItem]
+  );
+
+  useEffect(() => {
+    handleHotbarUseRef.current = handleHotbarUse;
+  }, [handleHotbarUse]);
+
+  const handleCraftRecipe = useCallback((recipe: CraftingRecipe) => {
+    setProgress((prev) => {
+      let updatedInv = [...prev.inventory];
+      recipe.materials.forEach((mat) => {
+        const existing = updatedInv.find((i) => i.id === mat.itemId);
+        if (existing) {
+          const remaining = existing.quantity - mat.count;
+          if (remaining > 0) {
+            updatedInv = updatedInv.map((i) => (i.id === mat.itemId ? { ...i, quantity: remaining } : i));
+          } else {
+            updatedInv = updatedInv.filter((i) => i.id !== mat.itemId);
+          }
+        }
+      });
+
+      const existingResult = updatedInv.find((i) => i.id === recipe.resultItem.id);
+      if (existingResult) {
+        updatedInv = updatedInv.map((i) =>
+          i.id === recipe.resultItem.id ? { ...i, quantity: i.quantity + recipe.resultCount } : i
+        );
+      } else {
+        updatedInv = [...updatedInv, { ...recipe.resultItem, quantity: recipe.resultCount }];
+      }
+
+      const next = { ...prev, inventory: updatedInv };
+      saveProgress(next);
+      return next;
+    });
+
+    if (engineRef.current) {
+      engineRef.current.interactions.showToast(
+        'FABRICATION COMPLETE',
+        `Synthesized ${recipe.resultCount}x ${recipe.resultItem.name}!`
+      );
+    }
+  }, []);
+
+  const handleDiscardItem = useCallback((itemId: string) => {
+    setProgress((prev) => {
+      const updatedInv = prev.inventory
+        .map((i) => (i.id === itemId ? { ...i, quantity: i.quantity - 1 } : i))
+        .filter((i) => i.quantity > 0);
+
+      const nextEquipped = { ...(prev.equipped || {}) };
+      Object.keys(nextEquipped).forEach((slot) => {
+        if (nextEquipped[slot as EquipmentSlot] === itemId && !updatedInv.some((i) => i.id === itemId)) {
+          nextEquipped[slot as EquipmentSlot] = null;
+        }
+      });
+
+      const next = { ...prev, inventory: updatedInv, equipped: nextEquipped };
+      saveProgress(next);
+      return next;
+    });
+  }, []);
 
   const handleToggleCamera = useCallback(() => {
     if (engineRef.current) {
@@ -122,8 +332,30 @@ export default function App() {
 
     engine.onToggleCamera = handleToggleCamera;
     engine.onOpenInventory = () => setShowInventory(true);
+    engine.onOpenCrafting = () => setShowCrafting(true);
     engine.onOpenQuests = () => setShowQuests(true);
     engine.onOpenMap = () => setShowMap(true);
+
+    engine.onStatsUpdate = (newStats) => {
+      setPlayerStats(newStats);
+    };
+
+    engine.onDamageEffect = (amount, reason) => {
+      setDamageAlpha(0.75);
+      engine.interactions.showToast('IMPACT DAMAGE', `${reason}: -${amount} HP`, 2.5);
+    };
+
+    engine.onHotbarUse = (slotIndex) => {
+      handleHotbarUseRef.current(slotIndex);
+    };
+
+    // Apply saved equipped stats to player
+    if (saved.equipped && saved.inventory) {
+      const statsList = Object.values(saved.equipped)
+        .filter(Boolean)
+        .map((id) => (saved.inventory as InventoryItem[]).find((i) => i.id === id)?.stats);
+      engine.player.applyEquipmentStats(statsList);
+    }
 
     engine.interactions.onStateChange = (state) => {
       setCurrentPrompt(state.currentPrompt);
@@ -172,16 +404,30 @@ export default function App() {
     engine.interactions.onResourceHarvested = (resource) => {
       setProgress((prev) => {
         const nextResources = Array.from(new Set([...(prev.collectedResources || []), resource.id]));
-        const newItem = {
-          id: `inv-${resource.id}`,
-          name: resource.name,
-          description: `Harvested from the drifting catwalks. High resonant conductivity.`,
-          category: resource.itemType as any,
-          quantity: 1,
-          valueCoins: resource.coinValue,
-          icon: resource.itemType === 'artifact' ? 'sparkles' : 'gem',
-        };
-        const updatedInv = [...(prev.inventory || []), newItem];
+        const dbItem = ITEM_DATABASE[resource.itemType];
+        const itemToAdd: InventoryItem = dbItem
+          ? { ...dbItem, quantity: 1 }
+          : {
+              id: `inv-${resource.id}`,
+              name: resource.name,
+              description: `Harvested from the drifting catwalks. High resonant conductivity.`,
+              category: 'resources',
+              rarity: 'uncommon',
+              quantity: 1,
+              valueCoins: resource.coinValue,
+              icon: 'gem',
+            };
+
+        const existing = prev.inventory.find((i) => i.id === itemToAdd.id);
+        let updatedInv: InventoryItem[];
+        if (existing) {
+          updatedInv = prev.inventory.map((i) =>
+            i.id === itemToAdd.id ? { ...i, quantity: i.quantity + 1 } : i
+          );
+        } else {
+          updatedInv = [...prev.inventory, itemToAdd];
+        }
+
         const next = {
           ...prev,
           collectedResources: nextResources,
@@ -482,6 +728,8 @@ export default function App() {
           player={engineRef.current.player}
           progress={progress}
           settings={settings}
+          playerStats={playerStats}
+          damageAlpha={damageAlpha}
           currentPrompt={currentPrompt}
           activeInscription={activeInscription}
           bannerToast={bannerToast}
@@ -493,10 +741,12 @@ export default function App() {
           onOpenJournal={() => setShowJournal(true)}
           onOpenQuests={() => setShowQuests(true)}
           onOpenInventory={() => setShowInventory(true)}
+          onOpenCrafting={() => setShowCrafting(true)}
           onOpenMap={() => setShowMap(true)}
           onCloseInscription={handleCloseInscription}
           onInteract={handleTriggerInteract}
           onToggleCamera={handleToggleCamera}
+          onHotbarUse={handleHotbarUse}
         />
       )}
 
@@ -528,7 +778,34 @@ export default function App() {
         <InventoryModal
           inventory={progress.inventory || []}
           userProfile={userProfile}
+          equipped={(progress.equipped as Record<EquipmentSlot, string | null>) || {
+            tool: null,
+            protective: null,
+            exploration: null,
+            utility: null,
+            relic: null,
+            artifact: null,
+          }}
+          playerStats={playerStats}
+          hotbar={progress.hotbar || [null, null, null, null, null, null]}
+          onUseItem={handleUseItem}
+          onEquipItem={handleEquipItem}
+          onUnequipItem={handleUnequipItem}
+          onAssignHotbar={handleAssignHotbar}
+          onDiscardItem={handleDiscardItem}
+          onOpenCrafting={() => {
+            setShowInventory(false);
+            setShowCrafting(true);
+          }}
           onClose={() => setShowInventory(false)}
+        />
+      )}
+
+      {showCrafting && (
+        <CraftingModal
+          inventory={progress.inventory || []}
+          onCraftRecipe={handleCraftRecipe}
+          onClose={() => setShowCrafting(false)}
         />
       )}
 

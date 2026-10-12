@@ -19,14 +19,93 @@ export interface GameSettings {
   buttonOpacity: number;     // 0.4 to 1.0
 }
 
+export type ItemRarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'relic';
+
+export type ItemCategory =
+  | 'resources'
+  | 'food_recovery'
+  | 'crafting_materials'
+  | 'tools_equipment'
+  | 'quest_objects'
+  | 'ancient_relics'
+  | 'rare_loot'
+  | 'collectibles'
+  | 'special_event'
+  // Legacy aliases for backward compatibility:
+  | 'material'
+  | 'artifact'
+  | 'consumable'
+  | 'key_item';
+
+export type EquipmentSlot = 'tool' | 'protective' | 'exploration' | 'utility' | 'relic' | 'artifact';
+
+export interface ItemEquipmentStats {
+  maxHealthBonus?: number;
+  maxStaminaBonus?: number;
+  speedMultiplier?: number;
+  fallDamageReduction?: number;
+  staminaRegenMultiplier?: number;
+  miningEfficiency?: number;
+  illuminationRadius?: number;
+}
+
 export interface InventoryItem {
   id: string;
   name: string;
   description: string;
-  category: 'material' | 'artifact' | 'consumable' | 'key_item';
+  category: ItemCategory;
+  rarity?: ItemRarity;
   quantity: number;
+  maxStack?: number;
   valueCoins: number;
   icon: string;
+  equipmentSlot?: EquipmentSlot;
+  stats?: ItemEquipmentStats;
+  healAmount?: number;
+  staminaAmount?: number;
+  tradeOffDescription?: string;
+}
+
+export interface PlayerEquippedGear {
+  tool?: InventoryItem | null;
+  protective?: InventoryItem | null;
+  exploration?: InventoryItem | null;
+  utility?: InventoryItem | null;
+  relic?: InventoryItem | null;
+  artifact?: InventoryItem | null;
+}
+
+export interface PlayerStats {
+  health: number;
+  maxHealth: number;
+  stamina: number;
+  maxStamina: number;
+  speedMultiplier: number;
+  fallDamageReduction: number;
+  staminaRegenRate: number;
+  isSprinting: boolean;
+  isExhausted: boolean;
+  locationName: string;
+  coordinates: [number, number, number];
+  environmentalStatus: string;
+  hazardLevel: 'safe' | 'caution' | 'danger';
+}
+
+export interface CraftingMaterialRequirement {
+  itemId: string;
+  itemName: string;
+  count: number;
+  icon?: string;
+}
+
+export interface CraftingRecipe {
+  id: string;
+  name: string;
+  description: string;
+  category: 'tools_equipment' | 'protective' | 'exploration' | 'food_recovery' | 'relics' | 'special';
+  resultItem: InventoryItem;
+  resultCount: number;
+  materials: CraftingMaterialRequirement[];
 }
 
 export interface Quest {
@@ -139,6 +218,15 @@ export interface GameProgress {
   collectedResources: string[];
   coins: number;
   inventory: InventoryItem[];
+  equipped?: {
+    tool?: string | null;
+    protective?: string | null;
+    exploration?: string | null;
+    utility?: string | null;
+    relic?: string | null;
+    artifact?: string | null;
+  };
+  hotbar?: (string | null)[]; // 6 slot item IDs
   completedQuests: string[];
   redMoonWitnessed: boolean;
 }

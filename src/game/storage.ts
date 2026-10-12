@@ -2,8 +2,9 @@
  * Local progress persistence for The Drifting World
  */
 import { GameProgress, GameSettings, UserProfile } from './types';
+import { INITIAL_INVENTORY_ITEMS, INITIAL_EQUIPPED_SLOTS, INITIAL_HOTBAR_IDS } from './itemDatabase';
 
-const STORAGE_KEY_PROGRESS = 'the_drifting_world_progress_v1';
+const STORAGE_KEY_PROGRESS = 'the_drifting_world_progress_v2';
 const STORAGE_KEY_SETTINGS = 'the_drifting_world_settings_v1';
 const STORAGE_KEY_PROFILE = 'the_drifting_world_profile_v1';
 
@@ -24,6 +25,8 @@ export const DEFAULT_SETTINGS: GameSettings = {
   sfxVolume: 0.85,
   showFps: false,
   cameraMode: 'third_person',
+  joystickSize: 'medium',
+  buttonOpacity: 0.85,
 };
 
 export const INITIAL_PROGRESS: GameProgress = {
@@ -35,35 +38,9 @@ export const INITIAL_PROGRESS: GameProgress = {
   activatedCheckpoints: [],
   collectedResources: [],
   coins: 420,
-  inventory: [
-    {
-      id: 'item-compass',
-      name: 'Aetheric Field Compass',
-      description: 'Precision celestial instrument calibrated to detect magnetic anomalies and drifting anchors.',
-      category: 'artifact',
-      quantity: 1,
-      valueCoins: 120,
-      icon: 'compass',
-    },
-    {
-      id: 'item-repair-gel',
-      name: 'Aerosol Nanite Gel',
-      description: 'Pressurized sealant used to restore explorer suit integrity and calibrate machinery.',
-      category: 'consumable',
-      quantity: 3,
-      valueCoins: 45,
-      icon: 'shield',
-    },
-    {
-      id: 'item-celestial-shard',
-      name: 'Celestine Shard',
-      description: 'Vibrant turquoise crystal harvested from high-altitude drifting landmasses.',
-      category: 'material',
-      quantity: 5,
-      valueCoins: 60,
-      icon: 'gem',
-    },
-  ],
+  inventory: INITIAL_INVENTORY_ITEMS,
+  equipped: INITIAL_EQUIPPED_SLOTS,
+  hotbar: INITIAL_HOTBAR_IDS,
   completedQuests: [],
   redMoonWitnessed: false,
 };

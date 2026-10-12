@@ -5,7 +5,7 @@
  */
 import * as THREE from 'three';
 import { soundSystem } from './audio';
-import { TelemetryData, CameraMode } from './types';
+import { TelemetryData, CameraMode, PlayerStats, ItemEquipmentStats } from './types';
 
 export interface PlayerInput {
   moveForward: number; // -1 to 1
@@ -39,6 +39,21 @@ export class PlayerController {
   private sprintMultiplier: number = 1.65;
   private jumpForce: number = 7.6;
   private gravity: number = -22.0;
+
+  // Player Survival & Stats
+  public health: number = 100;
+  public maxHealth: number = 100;
+  public stamina: number = 100;
+  public maxStamina: number = 100;
+  public isExhausted: boolean = false;
+  public speedMultiplier: number = 1.0;
+  public fallDamageReduction: number = 0.0;
+  public staminaRegenMultiplier: number = 1.0;
+  private prevAirVelocityY: number = 0;
+
+  // Callbacks
+  public onDamageTaken?: (amount: number, reason: string) => void;
+  public onStatsChange?: () => void;
 
   // 3D Character Model Rig
   public characterGroup!: THREE.Group;
@@ -237,6 +252,10 @@ export class PlayerController {
         this.velocity.set(0, 0, 0);
         this.isGrounded = true;
         this.isRespawning = false;
+        this.health = this.maxHealth;
+        this.stamina = this.maxStamina;
+        this.isExhausted = false;
+        if (this.onStatsChange) this.onStatsChange();
         if (this.onRespawnCallback) this.onRespawnCallback();
       }
       return;
@@ -261,7 +280,26 @@ export class PlayerController {
       moveDir.normalize();
     }
 
-    const currentSpeed = this.input.sprint ? this.walkSpeed * this.sprintMultiplier : this.walkSpeed;
+    // Stamina & Sprint Logic
+    let isSprintingNow = false;
+    if (this.input.sprint && isMoving && !this.isExhausted && this.stamina > 0) {
+      isSprintingNow = true;
+      this.stamina = Math.max(0, this.stamina - 18.0 * dt);
+      if (this.stamina <= 0) {
+        this.isExhausted = true;
+        soundSystem.playStaminaExhausted();
+      }
+    } else {
+      // Regenerate stamina when not sprinting (faster when resting/standing still)
+      const regenRate = (isMoving ? 16.0 : 28.0) * this.staminaRegenMultiplier;
+      this.stamina = Math.min(this.maxStamina, this.stamina + regenRate * dt);
+      if (this.isExhausted && this.stamina >= 18.0) {
+        this.isExhausted = false;
+      }
+    }
+
+    const effectiveWalkSpeed = this.walkSpeed * this.speedMultiplier;
+    const currentSpeed = isSprintingNow ? effectiveWalkSpeed * this.sprintMultiplier : effectiveWalkSpeed;
     const targetVx = moveDir.x * currentSpeed;
     const targetVz = moveDir.z * currentSpeed;
 
@@ -270,10 +308,21 @@ export class PlayerController {
     this.velocity.z += (targetVz - this.velocity.z) * Math.min(1, lerpFactor);
 
     if (this.input.jump && this.isGrounded) {
-      this.velocity.y = this.jumpForce;
+      const jumpStaminaCost = 12.0;
+      if (this.stamina >= jumpStaminaCost) {
+        this.stamina = Math.max(0, this.stamina - jumpStaminaCost);
+        this.velocity.y = this.jumpForce;
+      } else {
+        // Weaker jump when out of stamina
+        this.velocity.y = this.jumpForce * 0.7;
+      }
       this.isGrounded = false;
       this.input.jump = false;
       soundSystem.playJump();
+    }
+
+    if (!this.isGrounded) {
+      this.prevAirVelocityY = this.velocity.y;
     }
 
     this.velocity.y += this.gravity * dt;
@@ -285,11 +334,21 @@ export class PlayerController {
 
     // Ground raycasting & floor snapping
     const groundElevation = this.checkGroundCollision(nextPos);
+    const wasAirborne = !this.isGrounded;
 
     if (nextPos.y <= groundElevation) {
       nextPos.y = groundElevation;
       this.velocity.y = 0;
       this.isGrounded = true;
+
+      // Fall Damage Calculation on Impact
+      if (wasAirborne && this.prevAirVelocityY < -13.5) {
+        const excessSpeed = Math.abs(this.prevAirVelocityY) - 13.5;
+        const rawDamage = Math.round(excessSpeed * 4.8);
+        const damage = Math.max(5, Math.round(rawDamage * (1.0 - this.fallDamageReduction)));
+        this.takeDamage(damage, 'Fall Impact');
+      }
+      this.prevAirVelocityY = 0;
     } else {
       if (this.isGrounded && nextPos.y - groundElevation < 0.35) {
         nextPos.y = groundElevation;
@@ -303,7 +362,7 @@ export class PlayerController {
 
     // Void fall detection
     if (this.position.y < -35 && !this.isRespawning) {
-      this.triggerRespawn();
+      this.takeDamage(this.maxHealth, 'Void Abyss Fall');
     }
 
     // Update 3D Character Model position and limb animation
@@ -422,6 +481,104 @@ export class PlayerController {
     this.isRespawning = true;
     this.respawnFadeAlpha = 0;
     soundSystem.playRespawnTone();
+  }
+
+  public takeDamage(amount: number, reason: string = 'Environmental Hazard') {
+    if (this.isRespawning) return;
+    this.health = Math.max(0, this.health - amount);
+    soundSystem.playHurt();
+    if (this.onDamageTaken) {
+      this.onDamageTaken(amount, reason);
+    }
+    if (this.onStatsChange) {
+      this.onStatsChange();
+    }
+    if (this.health <= 0) {
+      this.triggerRespawn();
+    }
+  }
+
+  public heal(amount: number): number {
+    const prev = this.health;
+    this.health = Math.min(this.maxHealth, this.health + amount);
+    soundSystem.playHeal();
+    if (this.onStatsChange) this.onStatsChange();
+    return this.health - prev;
+  }
+
+  public restoreStamina(amount: number): number {
+    const prev = this.stamina;
+    this.stamina = Math.min(this.maxStamina, this.stamina + amount);
+    this.isExhausted = false;
+    soundSystem.playHeal();
+    if (this.onStatsChange) this.onStatsChange();
+    return this.stamina - prev;
+  }
+
+  public applyEquipmentStats(statsList: (ItemEquipmentStats | undefined)[]) {
+    let bonusHealth = 0;
+    let bonusStamina = 0;
+    let speedMult = 1.0;
+    let fallRed = 0.0;
+    let regenMult = 1.0;
+
+    statsList.forEach((stat) => {
+      if (!stat) return;
+      if (stat.maxHealthBonus) bonusHealth += stat.maxHealthBonus;
+      if (stat.maxStaminaBonus) bonusStamina += stat.maxStaminaBonus;
+      if (stat.speedMultiplier) speedMult *= stat.speedMultiplier;
+      if (stat.fallDamageReduction) fallRed = Math.min(0.85, fallRed + stat.fallDamageReduction);
+      if (stat.staminaRegenMultiplier) regenMult *= stat.staminaRegenMultiplier;
+    });
+
+    this.maxHealth = 100 + bonusHealth;
+    this.maxStamina = 100 + bonusStamina;
+    this.speedMultiplier = Math.max(0.6, Math.min(2.0, speedMult));
+    this.fallDamageReduction = Math.max(0, Math.min(0.85, fallRed));
+    this.staminaRegenMultiplier = Math.max(0.5, Math.min(2.5, regenMult));
+
+    this.health = Math.min(this.health, this.maxHealth);
+    this.stamina = Math.min(this.stamina, this.maxStamina);
+
+    if (this.onStatsChange) this.onStatsChange();
+  }
+
+  public getPlayerStats(sectorName: string = 'Sector 01: Observation Deck'): PlayerStats {
+    const coords: [number, number, number] = [
+      Math.round(this.position.x * 10) / 10,
+      Math.round(this.position.y * 10) / 10,
+      Math.round(this.position.z * 10) / 10,
+    ];
+
+    let hazardLevel: 'safe' | 'caution' | 'danger' = 'safe';
+    let environmentalStatus = 'Atmospheric Equilibrium: 100% Breathable';
+
+    if (this.position.y < -15) {
+      hazardLevel = 'danger';
+      environmentalStatus = 'Void Turbulence: Severe Gravitational Shearing';
+    } else if (this.health < 40) {
+      hazardLevel = 'caution';
+      environmentalStatus = 'Suit Integrity: Compromised / Repair Advised';
+    } else if (this.isExhausted) {
+      hazardLevel = 'caution';
+      environmentalStatus = 'Exertion Warning: Kinetic Dampeners Overheated';
+    }
+
+    return {
+      health: Math.round(this.health),
+      maxHealth: this.maxHealth,
+      stamina: Math.round(this.stamina),
+      maxStamina: this.maxStamina,
+      speedMultiplier: Math.round(this.speedMultiplier * 100) / 100,
+      fallDamageReduction: Math.round(this.fallDamageReduction * 100),
+      staminaRegenRate: Math.round(24 * this.staminaRegenMultiplier),
+      isSprinting: this.input.sprint && !this.isExhausted,
+      isExhausted: this.isExhausted,
+      locationName: sectorName,
+      coordinates: coords,
+      environmentalStatus,
+      hazardLevel,
+    };
   }
 
   public getTelemetry(): TelemetryData {

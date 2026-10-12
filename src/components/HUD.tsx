@@ -1,17 +1,59 @@
 /**
  * HUD for THE DRIFTING LAND
  * Complete desktop shortcuts and Android touchscreen controls with virtual joystick,
- * touch look, sprint, jump, interact, primary action, camera switch, inventory, quests, map, and pause.
+ * live Player Health & Stamina survival bars, environmental status, interactive Hotbar (1-6),
+ * touch look, sprint, jump, interact, primary action, camera switch, crafting, inventory, quests, map, and pause.
  */
 import React, { useRef, useState, useEffect, useCallback } from 'react';
-import { Pause, BookOpen, ChevronUp, Hand, X, Thermometer, Mountain, Video, Target, Zap, Backpack, Globe2 } from 'lucide-react';
-import { GameProgress, InteractableObject, PerformanceStats, TelemetryData, GameSettings } from '../game/types';
+import {
+  Pause,
+  BookOpen,
+  ChevronUp,
+  Hand,
+  X,
+  Thermometer,
+  Mountain,
+  Video,
+  Target,
+  Zap,
+  Backpack,
+  Globe2,
+  Heart,
+  Hammer,
+  Shield,
+  Compass,
+  Gem,
+  Flame,
+  Radio,
+  Clock,
+  Droplet,
+  Coffee,
+  Activity,
+  TreePine,
+  Sun,
+  Wind,
+  Box,
+  Key,
+  Eye,
+  AlertTriangle,
+} from 'lucide-react';
+import {
+  GameProgress,
+  InteractableObject,
+  PerformanceStats,
+  TelemetryData,
+  GameSettings,
+  PlayerStats,
+  InventoryItem,
+} from '../game/types';
 import { PlayerController } from '../game/player';
 
 interface HUDProps {
   player: PlayerController;
   progress: GameProgress;
   settings: GameSettings;
+  playerStats?: PlayerStats;
+  damageAlpha?: number;
   currentPrompt: InteractableObject | null;
   activeInscription: { title: string; text: string } | null;
   bannerToast: { title: string; subtitle: string; icon?: string } | null;
@@ -23,16 +65,20 @@ interface HUDProps {
   onOpenJournal: () => void;
   onOpenQuests?: () => void;
   onOpenInventory?: () => void;
+  onOpenCrafting?: () => void;
   onOpenMap?: () => void;
   onCloseInscription: () => void;
   onInteract: () => void;
   onToggleCamera: () => void;
+  onHotbarUse?: (slotIndex: number) => void;
 }
 
 export const HUD: React.FC<HUDProps> = ({
   player,
   progress,
   settings,
+  playerStats,
+  damageAlpha = 0,
   currentPrompt,
   activeInscription,
   bannerToast,
@@ -43,10 +89,12 @@ export const HUD: React.FC<HUDProps> = ({
   onOpenJournal,
   onOpenQuests,
   onOpenInventory,
+  onOpenCrafting,
   onOpenMap,
   onCloseInscription,
   onInteract,
   onToggleCamera,
+  onHotbarUse,
 }) => {
   const joystickBaseRef = useRef<HTMLDivElement>(null);
   const joystickThumbRef = useRef<HTMLDivElement>(null);
@@ -167,10 +215,84 @@ export const HUD: React.FC<HUDProps> = ({
   };
 
   const opacityVal = settings.buttonOpacity ?? 0.85;
-  const joystickSizeClass = settings.joystickSize === 'small' ? 'w-24 h-24' : settings.joystickSize === 'large' ? 'w-36 h-36' : 'w-28 h-28';
+  const joystickSizeClass =
+    settings.joystickSize === 'small' ? 'w-24 h-24' : settings.joystickSize === 'large' ? 'w-36 h-36' : 'w-28 h-28';
+
+  const health = playerStats?.health ?? Math.round(player.health);
+  const maxHealth = playerStats?.maxHealth ?? player.maxHealth;
+  const healthPercent = Math.max(0, Math.min(100, (health / maxHealth) * 100));
+
+  const stamina = playerStats?.stamina ?? Math.round(player.stamina);
+  const maxStamina = playerStats?.maxStamina ?? player.maxStamina;
+  const staminaPercent = Math.max(0, Math.min(100, (stamina / maxStamina) * 100));
+  const isExhausted = playerStats?.isExhausted ?? player.isExhausted;
+
+  const hotbarSlots = progress.hotbar || [null, null, null, null, null, null];
+
+  const getHotbarItem = (itemId: string | null): InventoryItem | null => {
+    if (!itemId) return null;
+    return progress.inventory.find((i) => i.id === itemId) || null;
+  };
+
+  const renderItemIcon = (iconName: string, className: string = 'w-4 h-4') => {
+    switch (iconName) {
+      case 'hammer':
+      case 'wrench':
+        return <Hammer className={className} />;
+      case 'flame':
+        return <Flame className={className} />;
+      case 'shield':
+      case 'shield-alert':
+      case 'shield-plus':
+        return <Shield className={className} />;
+      case 'zap':
+        return <Zap className={className} />;
+      case 'radio':
+        return <Radio className={className} />;
+      case 'clock':
+        return <Clock className={className} />;
+      case 'droplet':
+        return <Droplet className={className} />;
+      case 'coffee':
+        return <Coffee className={className} />;
+      case 'activity':
+        return <Activity className={className} />;
+      case 'tree-pine':
+        return <TreePine className={className} />;
+      case 'mountain':
+        return <Mountain className={className} />;
+      case 'sun':
+        return <Sun className={className} />;
+      case 'wind':
+        return <Wind className={className} />;
+      case 'box':
+        return <Box className={className} />;
+      case 'key':
+        return <Key className={className} />;
+      case 'eye':
+        return <Eye className={className} />;
+      case 'compass':
+        return <Compass className={className} />;
+      case 'gem':
+      default:
+        return <Gem className={className} />;
+    }
+  };
 
   return (
     <div className="absolute inset-0 pointer-events-none select-none overflow-hidden z-20 font-['Share_Tech_Mono',monospace]">
+      {/* Damage Flash Red Vignette */}
+      {damageAlpha > 0 && (
+        <div
+          className="absolute inset-0 pointer-events-none z-45 transition-opacity duration-150"
+          style={{
+            opacity: damageAlpha,
+            background: 'radial-gradient(ellipse at center, rgba(244,63,94,0) 40%, rgba(225,29,72,0.65) 100%)',
+          }}
+        />
+      )}
+
+      {/* Respawn Black Screen */}
       <div
         className="absolute inset-0 bg-[#070b14] transition-opacity pointer-events-none z-50 flex items-center justify-center"
         style={{ opacity: respawnAlpha }}
@@ -182,12 +304,79 @@ export const HUD: React.FC<HUDProps> = ({
         )}
       </div>
 
-      {/* Top-Left Title */}
-      <div className="absolute top-5 left-6 pointer-events-auto">
+      {/* Top-Left: Player Title & Survival Stats (Health, Stamina, Location) */}
+      <div className="absolute top-4 left-5 pointer-events-auto flex flex-col gap-2">
         <div className="font-['Cinzel'] text-slate-100 tracking-[0.25em] leading-none drop-shadow-[0_2px_12px_rgba(0,0,0,0.8)]">
-          <div className="text-[11px] font-medium tracking-[0.35em] text-slate-300/80 mb-1">THE</div>
-          <div className="text-2xl sm:text-3xl font-bold tracking-[0.2em] text-white">DRIFTING</div>
-          <div className="text-2xl sm:text-3xl font-bold tracking-[0.2em] text-white mt-0.5">LAND</div>
+          <div className="text-[10px] font-medium tracking-[0.3em] text-slate-400">THE DRIFTING LAND</div>
+        </div>
+
+        {/* Health & Stamina HUD Card */}
+        <div className="px-3.5 py-2.5 rounded-2xl bg-black/75 border border-white/20 backdrop-blur-md shadow-2xl w-60 sm:w-68 space-y-2">
+          {/* Health Bar */}
+          <div>
+            <div className="flex items-center justify-between text-[11px] mb-1">
+              <span className="flex items-center gap-1.5 text-rose-300 font-bold">
+                <Heart className="w-3.5 h-3.5 text-rose-400 fill-rose-500/30" />
+                HEALTH
+              </span>
+              <span className="font-mono text-slate-200">
+                {health} / {maxHealth}
+              </span>
+            </div>
+            <div className="w-full h-2 rounded-full bg-slate-900 overflow-hidden border border-slate-800">
+              <div
+                className={`h-full transition-all duration-200 ${
+                  healthPercent > 50
+                    ? 'bg-gradient-to-r from-emerald-500 to-teal-400'
+                    : healthPercent > 25
+                    ? 'bg-gradient-to-r from-amber-500 to-rose-400'
+                    : 'bg-rose-500 animate-pulse'
+                }`}
+                style={{ width: `${healthPercent}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Stamina Bar */}
+          <div>
+            <div className="flex items-center justify-between text-[11px] mb-1">
+              <span className="flex items-center gap-1.5 text-amber-300 font-bold">
+                <Zap className="w-3.5 h-3.5 text-amber-400 fill-amber-500/30" />
+                STAMINA
+              </span>
+              <span className="font-mono text-slate-200">
+                {isExhausted ? (
+                  <span className="text-rose-400 font-bold animate-pulse text-[10px]">EXHAUSTED</span>
+                ) : (
+                  `${stamina} / ${maxStamina}`
+                )}
+              </span>
+            </div>
+            <div className="w-full h-2 rounded-full bg-slate-900 overflow-hidden border border-slate-800">
+              <div
+                className={`h-full transition-all duration-100 ${
+                  isExhausted
+                    ? 'bg-rose-500'
+                    : 'bg-gradient-to-r from-amber-400 to-cyan-400'
+                }`}
+                style={{ width: `${staminaPercent}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Location & Status Line */}
+          <div className="pt-1 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-mono text-slate-400">
+            <span className="truncate max-w-[150px]">
+              {playerStats?.locationName || 'Sector 01: Observation Deck'}
+            </span>
+            {playerStats?.hazardLevel === 'danger' ? (
+              <span className="text-rose-400 font-bold flex items-center gap-1 animate-pulse">
+                <AlertTriangle className="w-3 h-3" /> VOID RISK
+              </span>
+            ) : (
+              <span className="text-emerald-400 font-bold">STABLE</span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -208,11 +397,11 @@ export const HUD: React.FC<HUDProps> = ({
         </div>
       </div>
 
-      {/* Top-Right Quests & Shortcuts */}
-      <div className="absolute top-5 right-6 flex items-start gap-3 pointer-events-auto">
+      {/* Top-Right Quests & Quick Nav */}
+      <div className="absolute top-4 right-5 flex items-start gap-2.5 pointer-events-auto">
         <div
           onClick={onOpenQuests}
-          className="px-4 py-2 rounded bg-black/60 hover:bg-black/80 border border-white/20 hover:border-cyan-400/50 backdrop-blur-md text-right shadow-lg cursor-pointer transition-all group"
+          className="px-3.5 py-2 rounded-xl bg-black/60 hover:bg-black/80 border border-white/20 hover:border-cyan-400/50 backdrop-blur-md text-right shadow-lg cursor-pointer transition-all group"
         >
           <div className="flex items-center justify-end gap-2 mb-0.5">
             {telemetry.timeOfDay === 'red_moon' ? (
@@ -224,8 +413,8 @@ export const HUD: React.FC<HUDProps> = ({
                 {telemetry.timeLabel || 'SOLAR CYCLE'}
               </span>
             )}
-            <div className="text-[11px] uppercase tracking-[0.2em] text-amber-300/90 font-semibold group-hover:text-amber-200">
-              EXPLORE THE DRIFTING LANDS
+            <div className="text-[10px] uppercase tracking-[0.2em] text-amber-300/90 font-semibold group-hover:text-amber-200">
+              MISSION OBJECTIVE
             </div>
           </div>
           <div className="text-[10px] text-slate-300 group-hover:text-cyan-200 font-mono mt-0.5">
@@ -234,10 +423,11 @@ export const HUD: React.FC<HUDProps> = ({
               : `SURVEY TELEMETRY BEACONS [${progress.activatedAnchors.length}/3]`}
           </div>
         </div>
+
         <div className="flex items-center gap-1.5">
           <button
             onClick={onToggleCamera}
-            className="px-2.5 py-1.5 rounded bg-black/60 hover:bg-slate-800 text-teal-300 border border-white/20 backdrop-blur-md cursor-pointer transition-colors flex items-center gap-1 text-[10px] font-mono"
+            className="px-2.5 py-1.5 rounded-xl bg-black/60 hover:bg-slate-800 text-teal-300 border border-white/20 backdrop-blur-md cursor-pointer transition-colors flex items-center gap-1 text-[10px] font-mono"
             title="Toggle Camera View (V key)"
           >
             <Video className="w-3.5 h-3.5" />
@@ -245,43 +435,58 @@ export const HUD: React.FC<HUDProps> = ({
               {player.cameraMode === 'first_person' ? '1ST' : player.cameraMode === 'second_person' ? '2ND' : '3RD'}
             </span>
           </button>
+
+          {onOpenCrafting && (
+            <button
+              onClick={onOpenCrafting}
+              className="p-2 rounded-xl bg-black/60 hover:bg-slate-800 text-amber-300 border border-white/20 backdrop-blur-md cursor-pointer transition-colors"
+              title="Crafting Workbench (C)"
+            >
+              <Hammer className="w-4 h-4" />
+            </button>
+          )}
+
           {onOpenInventory && (
             <button
               onClick={onOpenInventory}
-              className="p-2 rounded bg-black/60 hover:bg-slate-800 text-cyan-300 border border-white/20 backdrop-blur-md cursor-pointer transition-colors"
-              title="Inventory (Tab / I)"
+              className="p-2 rounded-xl bg-black/60 hover:bg-slate-800 text-cyan-300 border border-white/20 backdrop-blur-md cursor-pointer transition-colors"
+              title="Inventory Cargo & Equipment (Tab / I)"
             >
               <Backpack className="w-4 h-4" />
             </button>
           )}
+
           {onOpenMap && (
             <button
               onClick={onOpenMap}
-              className="p-2 rounded bg-black/60 hover:bg-slate-800 text-purple-300 border border-white/20 backdrop-blur-md cursor-pointer transition-colors"
+              className="p-2 rounded-xl bg-black/60 hover:bg-slate-800 text-purple-300 border border-white/20 backdrop-blur-md cursor-pointer transition-colors"
               title="Map (M)"
             >
               <Globe2 className="w-4 h-4" />
             </button>
           )}
+
           {onOpenQuests && (
             <button
               onClick={onOpenQuests}
-              className="p-2 rounded bg-black/60 hover:bg-slate-800 text-amber-300 border border-white/20 backdrop-blur-md cursor-pointer transition-colors"
-              title="Quests (J)"
+              className="p-2 rounded-xl bg-black/60 hover:bg-slate-800 text-amber-300 border border-white/20 backdrop-blur-md cursor-pointer transition-colors"
+              title="Quests Journal (J)"
             >
               <Target className="w-4 h-4" />
             </button>
           )}
+
           <button
             onClick={onOpenJournal}
-            className="p-2 rounded bg-black/60 hover:bg-slate-800 text-cyan-300 border border-white/20 backdrop-blur-md cursor-pointer transition-colors"
+            className="p-2 rounded-xl bg-black/60 hover:bg-slate-800 text-cyan-300 border border-white/20 backdrop-blur-md cursor-pointer transition-colors"
             title="Archive Logs"
           >
             <BookOpen className="w-4 h-4" />
           </button>
+
           <button
             onClick={onPause}
-            className="p-2 rounded bg-black/60 hover:bg-slate-800 text-slate-200 border border-white/20 backdrop-blur-md cursor-pointer transition-colors"
+            className="p-2 rounded-xl bg-black/60 hover:bg-slate-800 text-slate-200 border border-white/20 backdrop-blur-md cursor-pointer transition-colors"
             title="Pause (Esc)"
           >
             <Pause className="w-4 h-4" />
@@ -289,27 +494,64 @@ export const HUD: React.FC<HUDProps> = ({
         </div>
       </div>
 
-      {/* Center Crosshair & Prompt */}
+      {/* Center Crosshair & Interaction Prompt */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none flex flex-col items-center">
         <div className="relative w-4 h-4 flex items-center justify-center">
           <div className="w-3.5 h-[1.5px] bg-white/70 drop-shadow" />
           <div className="absolute h-3.5 w-[1.5px] bg-white/70 drop-shadow" />
         </div>
         {currentPrompt && (
-          <div className="mt-4 px-3 py-1 rounded bg-black/80 border border-cyan-400 text-xs text-cyan-300 font-mono tracking-wider backdrop-blur-md animate-pulse">
+          <div className="mt-4 px-3.5 py-1.5 rounded-xl bg-black/85 border border-cyan-400 text-xs text-cyan-300 font-mono tracking-wider backdrop-blur-md animate-pulse shadow-lg">
             [E / TAP] {currentPrompt.prompt}
           </div>
         )}
       </div>
 
+      {/* Bottom Center: Interactive Hotbar (1-6) */}
+      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 pointer-events-auto flex items-center gap-1.5 sm:gap-2 px-3 py-2 rounded-2xl bg-black/75 border border-white/20 backdrop-blur-md shadow-2xl">
+        {hotbarSlots.map((itemId, idx) => {
+          const item = getHotbarItem(itemId);
+          return (
+            <button
+              key={idx}
+              onClick={() => onHotbarUse?.(idx)}
+              className={`relative w-11 h-11 sm:w-12 sm:h-12 rounded-xl border flex flex-col items-center justify-center transition-all cursor-pointer ${
+                item
+                  ? 'bg-slate-900/90 border-cyan-500/40 hover:border-cyan-400 hover:scale-105 active:scale-95 shadow-md'
+                  : 'bg-black/40 border-slate-800/80 text-slate-600'
+              }`}
+              title={item ? `${item.name} [Press ${idx + 1}]` : `Slot ${idx + 1} Empty`}
+            >
+              <span className="absolute top-0.5 left-1 text-[8px] font-mono text-slate-400">
+                {idx + 1}
+              </span>
+              {item ? (
+                <>
+                  <div className="text-cyan-300 mb-0.5">
+                    {renderItemIcon(item.icon, 'w-4 h-4 sm:w-5 sm:h-5')}
+                  </div>
+                  {item.quantity > 1 && (
+                    <span className="absolute bottom-0.5 right-1 text-[8px] font-mono text-amber-300 font-bold">
+                      x{item.quantity}
+                    </span>
+                  )}
+                </>
+              ) : (
+                <span className="text-[10px] text-slate-700">--</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
       {/* Bottom Right Telemetry */}
-      <div className="absolute bottom-5 right-6 pointer-events-auto flex flex-col items-end gap-2">
-        <div className="px-4 py-3 rounded-lg bg-black/70 border border-white/20 backdrop-blur-md w-56 shadow-2xl text-xs space-y-2.5">
+      <div className="absolute bottom-4 right-5 pointer-events-auto flex flex-col items-end gap-2">
+        <div className="px-3.5 py-2.5 rounded-xl bg-black/70 border border-white/20 backdrop-blur-md w-52 shadow-2xl text-xs space-y-2">
           <div>
-            <div className="flex items-center justify-between text-[11px] text-slate-300 mb-1">
+            <div className="flex items-center justify-between text-[11px] text-slate-300 mb-0.5">
               <span className="flex items-center gap-1.5 text-slate-400">
                 <Thermometer className="w-3.5 h-3.5 text-amber-400" />
-                Temperature
+                Temp
               </span>
               <span className="font-mono text-amber-300">{telemetry.temperatureCelsius} C</span>
             </div>
@@ -321,30 +563,24 @@ export const HUD: React.FC<HUDProps> = ({
             </div>
           </div>
           <div>
-            <div className="flex items-center justify-between text-[11px] text-slate-300 mb-1">
+            <div className="flex items-center justify-between text-[11px] text-slate-300 mb-0.5">
               <span className="flex items-center gap-1.5 text-slate-400">
                 <Mountain className="w-3.5 h-3.5 text-cyan-400" />
-                Elevation
+                Altitude
               </span>
               <span className="font-mono text-cyan-300">{telemetry.elevationMeters} m</span>
             </div>
-            <div className="relative w-full h-1.5 rounded-full bg-slate-800 flex items-center">
+            <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
               <div
                 className="h-full bg-cyan-400 transition-all duration-300"
                 style={{ width: `${Math.min(100, (telemetry.elevationMeters / 2000) * 100)}%` }}
               />
-              <div
-                className="absolute w-2.5 h-2.5 bg-slate-100 rotate-45 shadow-[0_0_8px_rgba(56,189,248,0.9)] border border-cyan-400"
-                style={{ right: '4px' }}
-              />
             </div>
           </div>
         </div>
-        <div className="text-[10px] text-slate-400/80 font-mono tracking-wider">
-          BUILD V1.2.7 | ENGINE: THREE.JS (WEBGL)
-        </div>
       </div>
 
+      {/* Banner Toast Notification */}
       {bannerToast && (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 max-w-sm w-11/12 p-3 rounded-xl bg-black/85 border border-cyan-400 shadow-[0_0_24px_rgba(6,182,212,0.4)] backdrop-blur-md pointer-events-auto">
           <div className="text-xs font-bold uppercase tracking-wider text-cyan-300">
@@ -356,6 +592,7 @@ export const HUD: React.FC<HUDProps> = ({
         </div>
       )}
 
+      {/* Active Inscription Modal */}
       {activeInscription && (
         <div className="absolute inset-0 z-40 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm pointer-events-auto">
           <div className="max-w-md w-full p-6 rounded-2xl bg-slate-950 border border-cyan-400/60 shadow-2xl relative text-left">
@@ -384,7 +621,7 @@ export const HUD: React.FC<HUDProps> = ({
         </div>
       )}
 
-      {/* MOBILE TOUCH CONTROLS WITH ADJUSTABLE OPACITY & SIZE */}
+      {/* Mobile Touch Virtual Joystick */}
       <div
         ref={joystickBaseRef}
         onTouchStart={handleJoystickTouchStart}
@@ -401,20 +638,22 @@ export const HUD: React.FC<HUDProps> = ({
         />
       </div>
 
+      {/* Mobile Touch Look Swipe Surface */}
       <div
         onTouchStart={handleLookTouchStart}
         className="absolute top-20 right-0 bottom-28 w-1/2 pointer-events-auto touch-none"
         aria-hidden="true"
       />
 
+      {/* Mobile Action Buttons (Right Side) */}
       <div
         style={{ opacity: opacityVal }}
-        className="absolute bottom-6 right-64 flex items-center gap-2.5 pointer-events-auto"
+        className="absolute bottom-6 right-58 sm:right-64 flex items-center gap-2 pointer-events-auto"
       >
         {currentPrompt && (
           <button
             onClick={onInteract}
-            className="flex flex-col items-center justify-center w-14 h-14 rounded-full bg-gradient-to-r from-cyan-500 to-teal-500 text-white shadow-[0_0_20px_rgba(6,182,212,0.8)] active:scale-90 transition-transform cursor-pointer animate-pulse"
+            className="flex flex-col items-center justify-center w-13 h-13 rounded-full bg-gradient-to-r from-cyan-500 to-teal-500 text-white shadow-[0_0_20px_rgba(6,182,212,0.8)] active:scale-90 transition-transform cursor-pointer animate-pulse"
             aria-label="Interact"
           >
             <Hand className="w-5 h-5 mb-0.5" />
@@ -425,34 +664,34 @@ export const HUD: React.FC<HUDProps> = ({
           onClick={() => {
             player.input.primaryAction = true;
           }}
-          className="flex flex-col items-center justify-center w-12 h-12 rounded-full bg-cyan-950/80 border border-cyan-400/50 text-cyan-200 active:scale-90 transition-all cursor-pointer"
+          className="flex flex-col items-center justify-center w-11 h-11 rounded-full bg-cyan-950/80 border border-cyan-400/50 text-cyan-200 active:scale-90 transition-all cursor-pointer"
           title="Primary Action (F)"
         >
-          <Zap className="w-5 h-5" />
+          <Zap className="w-4 h-4" />
           <span className="text-[7px] font-bold uppercase">TOOL</span>
         </button>
         <button
           onClick={() => {
             player.input.sprint = !player.input.sprint;
           }}
-          className={`flex flex-col items-center justify-center w-12 h-12 rounded-full border text-xs font-bold transition-all cursor-pointer ${
+          className={`flex flex-col items-center justify-center w-11 h-11 rounded-full border text-xs font-bold transition-all cursor-pointer ${
             player.input.sprint
               ? 'bg-amber-600 border-amber-400 text-white shadow-[0_0_12px_rgba(245,158,11,0.6)]'
               : 'bg-black/60 border-white/30 text-slate-300'
           }`}
           title="Sprint Toggle"
         >
-          <span className="text-[8px]">SPRINT</span>
-          <span className="text-[9px] font-mono">{player.input.sprint ? 'ON' : 'OFF'}</span>
+          <span className="text-[7px]">SPRINT</span>
+          <span className="text-[8px] font-mono">{player.input.sprint ? 'ON' : 'OFF'}</span>
         </button>
         <button
           onClick={() => {
             player.input.jump = true;
           }}
-          className="flex flex-col items-center justify-center w-14 h-14 rounded-full bg-black/60 hover:bg-slate-800 border border-white/30 text-white backdrop-blur-md active:scale-90 transition-all cursor-pointer"
+          className="flex flex-col items-center justify-center w-13 h-13 rounded-full bg-black/60 hover:bg-slate-800 border border-white/30 text-white backdrop-blur-md active:scale-90 transition-all cursor-pointer"
           aria-label="Jump"
         >
-          <ChevronUp className="w-6 h-6" />
+          <ChevronUp className="w-5 h-5" />
           <span className="text-[8px] font-bold uppercase">JUMP</span>
         </button>
       </div>

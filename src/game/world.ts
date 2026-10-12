@@ -1199,6 +1199,39 @@ export class WorldManager {
       metalness: 0.9,
     });
 
+    const matWood = new THREE.MeshStandardMaterial({
+      color: 0x854d0e,
+      roughness: 0.8,
+      metalness: 0.1,
+    });
+
+    const matStone = new THREE.MeshStandardMaterial({
+      color: 0x475569,
+      roughness: 0.7,
+      metalness: 0.2,
+    });
+
+    const matFlora = new THREE.MeshStandardMaterial({
+      color: 0x10b981,
+      emissive: 0x059669,
+      emissiveIntensity: 0.8,
+      roughness: 0.3,
+    });
+
+    const matAmber = new THREE.MeshStandardMaterial({
+      color: 0xf59e0b,
+      emissive: 0xb45309,
+      emissiveIntensity: 0.6,
+      roughness: 0.2,
+    });
+
+    const matVoid = new THREE.MeshStandardMaterial({
+      color: 0x8b5cf6,
+      emissive: 0x6d28d9,
+      emissiveIntensity: 0.7,
+      roughness: 0.4,
+    });
+
     const spawnResource = (
       id: string,
       name: string,
@@ -1319,6 +1352,102 @@ export class WorldManager {
       [-5.0, 5.4, -42.0],
       matChrono,
       new THREE.IcosahedronGeometry(0.3, 0)
+    );
+
+    // 7. Petrified Driftwood - Observation Deck Landing
+    spawnResource(
+      'res-wood-1',
+      'Petrified Driftwood',
+      'mat-wood',
+      15,
+      30,
+      [-4.0, 4.4, 5.0],
+      matWood,
+      new THREE.CylinderGeometry(0.12, 0.16, 0.6, 6)
+    );
+
+    // 8. Petrified Driftwood - Mid-Bridge Approach
+    spawnResource(
+      'res-wood-2',
+      'Petrified Driftwood',
+      'mat-wood',
+      15,
+      30,
+      [1.5, 4.8, -12.0],
+      matWood,
+      new THREE.CylinderGeometry(0.12, 0.16, 0.6, 6)
+    );
+
+    // 9. Basalt Strata Fragment - West Balcony
+    spawnResource(
+      'res-stone-1',
+      'Basalt Strata Fragment',
+      'mat-stone',
+      15,
+      35,
+      [-7.5, 4.4, 1.5],
+      matStone,
+      new THREE.DodecahedronGeometry(0.25, 0)
+    );
+
+    // 10. Basalt Strata Fragment - Sky Bridge Overlook
+    spawnResource(
+      'res-stone-2',
+      'Basalt Strata Fragment',
+      'mat-stone',
+      15,
+      35,
+      [-2.0, 4.8, -26.0],
+      matStone,
+      new THREE.DodecahedronGeometry(0.25, 0)
+    );
+
+    // 11. Lumenvine Fibers - Observation Overlook Garden
+    spawnResource(
+      'res-lumenvine-1',
+      'Lumenvine Tendril',
+      'mat-lumenvine',
+      25,
+      45,
+      [5.5, 4.4, 6.0],
+      matFlora,
+      new THREE.TorusGeometry(0.22, 0.08, 6, 12)
+    );
+
+    // 12. Amber Solar Resin - Geodesic Dome Exterior
+    spawnResource(
+      'res-amber-1',
+      'Amber Solar Resin',
+      'mat-amber-resin',
+      30,
+      50,
+      [16.0, 4.6, -34.0],
+      matAmber,
+      new THREE.OctahedronGeometry(0.22, 0)
+    );
+
+    // 13. Void Drift Residue - Rift Edge
+    spawnResource(
+      'res-void-1',
+      'Void Drift Residue',
+      'mat-void-dust',
+      45,
+      70,
+      [-4.0, 5.0, -36.0],
+      matVoid,
+      new THREE.IcosahedronGeometry(0.24, 0)
+    );
+
+    // 14. Floating Spring Aether - Hydro-Condensor Pod
+    spawnResource(
+      'res-spring-1',
+      'Floating Spring Aether',
+      'mat-spring-water',
+      20,
+      40,
+      [2.5, 4.4, 7.0],
+      matCrystal,
+      new THREE.SphereGeometry(0.2, 8, 8)
     );
   }
 

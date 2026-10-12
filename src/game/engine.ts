@@ -8,7 +8,7 @@ import { PlayerController } from './player';
 import { WorldManager } from './world';
 import { ThreadManager } from './threads';
 import { InteractionManager, InteractionState } from './interactions';
-import { GameSettings, PerformanceStats, TelemetryData } from './types';
+import { GameSettings, PerformanceStats, TelemetryData, PlayerStats } from './types';
 import { soundSystem } from './audio';
 
 export class GameEngine {
@@ -33,6 +33,10 @@ export class GameEngine {
   public onPerformanceUpdate?: (stats: PerformanceStats) => void;
   public onRespawnEffect?: (alpha: number) => void;
   public onTelemetryUpdate?: (data: TelemetryData) => void;
+  public onStatsUpdate?: (stats: PlayerStats) => void;
+  public onDamageEffect?: (amount: number, reason: string) => void;
+  public onHotbarUse?: (slotIndex: number) => void;
+  public onOpenCrafting?: () => void;
   public onToggleCamera?: () => void;
   public onOpenInventory?: () => void;
   public onOpenQuests?: () => void;
@@ -101,6 +105,12 @@ export class GameEngine {
     this.player.setSensitivity(this.settings.sensitivity);
     this.player.setCameraMode(this.settings.cameraMode || 'third_person');
     this.player.walkableMeshes = this.world.walkableMeshes;
+    this.player.onDamageTaken = (amount, reason) => {
+      if (this.onDamageEffect) this.onDamageEffect(amount, reason);
+    };
+    this.player.onStatsChange = () => {
+      if (this.onStatsUpdate) this.onStatsUpdate(this.player.getPlayerStats());
+    };
 
     this.threads = new ThreadManager(this.scene);
     this.interactions = new InteractionManager(this.world, this.threads, this.player);
@@ -163,6 +173,10 @@ export class GameEngine {
           timeOfDay: this.world.timeOfDay,
           timeLabel: timeLabels[this.world.timeOfDay] || 'SOLAR CYCLE: NORMAL',
         });
+      }
+
+      if (this.onStatsUpdate) {
+        this.onStatsUpdate(this.player.getPlayerStats());
       }
 
       if (this.onRespawnEffect) this.onRespawnEffect(this.player.respawnFadeAlpha);
@@ -232,6 +246,15 @@ export class GameEngine {
       if (e.code === 'KeyM') {
         if (this.onOpenMap) this.onOpenMap();
       }
+      if (e.code === 'KeyC') {
+        if (this.onOpenCrafting) this.onOpenCrafting();
+      }
+      if (e.code === 'Digit1') this.onHotbarUse?.(0);
+      if (e.code === 'Digit2') this.onHotbarUse?.(1);
+      if (e.code === 'Digit3') this.onHotbarUse?.(2);
+      if (e.code === 'Digit4') this.onHotbarUse?.(3);
+      if (e.code === 'Digit5') this.onHotbarUse?.(4);
+      if (e.code === 'Digit6') this.onHotbarUse?.(5);
       if (e.code === 'Escape') {
         this.isPaused = !this.isPaused;
       }
