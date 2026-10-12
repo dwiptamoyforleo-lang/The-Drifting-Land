@@ -27,6 +27,9 @@ export class GameEngine {
   public stats: PerformanceStats = { fps: 60, drawCalls: 0, triangles: 0 };
   private frameCount: number = 0;
   private fpsTimer: number = 0;
+  private telemetryTimer: number = 0;
+  private statsTimer: number = 0;
+  private respawnEffectTimer: number = 0;
   private activeKeys: Set<string> = new Set();
   private isPointerLocked: boolean = false;
 
@@ -194,7 +197,10 @@ export class GameEngine {
       this.processDesktopMovement();
       this.player.update(delta);
 
-      if (this.onTelemetryUpdate) {
+      // HUD data is not part of the render loop: publish it at a bounded rate.
+      this.telemetryTimer += delta;
+      if (this.onTelemetryUpdate && this.telemetryTimer >= 0.1) {
+        this.telemetryTimer %= 0.1;
         const baseTelemetry = this.player.getTelemetry();
         const timeLabels: Record<string, string> = {
           day: 'SOLAR CYCLE: MIDDAY',
@@ -209,17 +215,27 @@ export class GameEngine {
         });
       }
 
-      if (this.onStatsUpdate) {
+      this.statsTimer += delta;
+      if (this.onStatsUpdate && this.statsTimer >= 0.2) {
+        this.statsTimer %= 0.2;
         this.onStatsUpdate(this.player.getPlayerStats());
       }
 
-      if (this.onRespawnEffect) this.onRespawnEffect(this.player.respawnFadeAlpha);
+      this.respawnEffectTimer += delta;
+      if (this.onRespawnEffect && this.respawnEffectTimer >= 1 / 30) {
+        this.respawnEffectTimer %= 1 / 30;
+        this.onRespawnEffect(this.player.respawnFadeAlpha);
+      }
 
       this.world.update(elapsedTime, delta, this.player.position);
 
-      // Campfire rest healing near Traveler Jorah's rest camp ([8.0, 4.6, -18.0])
-      const campfireDist = this.player.position.distanceTo(new THREE.Vector3(8.0, 4.6, -18.0));
-      if (campfireDist < 3.8 && !this.player.isRespawning) {
+      // Campfire rest healing near Traveler Jorah's rest camp ([8.0, 4.6, -18.0]).
+      // Scalar distance math avoids allocating a temporary Vector3 every frame.
+      const campfireDx = this.player.position.x - 8.0;
+      const campfireDy = this.player.position.y - 4.6;
+      const campfireDz = this.player.position.z + 18.0;
+      const campfireDistSq = campfireDx * campfireDx + campfireDy * campfireDy + campfireDz * campfireDz;
+      if (campfireDistSq < 3.8 * 3.8 && !this.player.isRespawning) {
         if (this.player.health < this.player.maxHealth || this.player.stamina < this.player.maxStamina) {
           this.player.heal(delta * 5.0);
           this.player.restoreStamina(delta * 18.0);
@@ -364,6 +380,7 @@ export class GameEngine {
   public destroy() {
     this.isRunning = false;
     if (this.animFrameId !== null) cancelAnimationFrame(this.animFrameId);
+    this.activeKeys.clear();
     if (this.renderer) {
       this.renderer.dispose();
       this.renderer.forceContextLoss();
