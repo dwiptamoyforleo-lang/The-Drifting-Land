@@ -24,8 +24,6 @@ export const DEFAULT_SETTINGS: GameSettings = {
   sfxVolume: 0.85,
   showFps: false,
   cameraMode: 'third_person',
-  joystickSize: 'medium',
-  buttonOpacity: 0.85,
 };
 
 export const INITIAL_PROGRESS: GameProgress = {
