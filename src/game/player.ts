@@ -1,12 +1,7 @@
 /**
- * Third-Person Player Controller for The Drifting Land.
- * Strictly Third-Person ONLY.
- * Features:
- * - 3D Sci-Fi Explorer Character Model with procedural walking/running limb animations
- * - Smooth orbiting third-person camera trailing behind the character
- * - Brass Field Compass held by the character
- * - Robust collision physics preventing any falling-through-floor bugs
- * - Real-time TelemetryData (Heading, Elevation, Temperature)
+ * Player Controller for The Drifting Land.
+ * Supports First-Person, Third-Person, and Second-Person Observer View.
+ * Features sprint physics, smooth camera transitions, and telemetry data.
  */
 import * as THREE from 'three';
 import { soundSystem } from './audio';
@@ -15,10 +10,12 @@ import { TelemetryData, CameraMode } from './types';
 export interface PlayerInput {
   moveForward: number; // -1 to 1
   moveRight: number;   // -1 to 1
-  lookDeltaX: number;  // radians or pixels
-  lookDeltaY: number;  // radians or pixels
+  lookDeltaX: number;
+  lookDeltaY: number;
   jump: boolean;
+  sprint: boolean;
   interact: boolean;
+  primaryAction: boolean;
 }
 
 export class PlayerController {
@@ -26,8 +23,8 @@ export class PlayerController {
   public camera: THREE.PerspectiveCamera;
   public position: THREE.Vector3;
   public velocity: THREE.Vector3;
-  public yaw: number = 0;   // camera orbit horizontal angle
-  public pitch: number = 0.25; // camera orbit vertical angle
+  public yaw: number = 0;
+  public pitch: number = 0.25;
   public isGrounded: boolean = true;
   public lastCheckpoint: THREE.Vector3;
   public cameraMode: CameraMode = 'third_person';
@@ -39,6 +36,7 @@ export class PlayerController {
 
   // Movement physics
   private walkSpeed: number = 5.8;
+  private sprintMultiplier: number = 1.65;
   private jumpForce: number = 7.6;
   private gravity: number = -22.0;
 
@@ -71,7 +69,9 @@ export class PlayerController {
     lookDeltaX: 0,
     lookDeltaY: 0,
     jump: false,
+    sprint: false,
     interact: false,
+    primaryAction: false,
   };
 
   public sensitivity: number = 1.2;
@@ -87,41 +87,36 @@ export class PlayerController {
     this.raycaster = new THREE.Raycaster();
     this.raycaster.far = 4.0;
 
-    // Build Third-Person Character Model & add directly to scene
     this.buildCharacterModel();
     this.updateCamera(0.016);
   }
 
-  /**
-   * Builds the stylized sci-fi explorer character model visible in Third Person!
-   */
   private buildCharacterModel() {
     this.characterGroup = new THREE.Group();
     this.characterGroup.position.copy(this.position);
 
-    // Materials
     const matSuitBlue = new THREE.MeshStandardMaterial({
-      color: 0x0284c7, // explorer cyan-blue jacket
+      color: 0x0284c7,
       roughness: 0.5,
       metalness: 0.1,
       flatShading: true,
     });
 
     const matDarkPants = new THREE.MeshStandardMaterial({
-      color: 0x1e293b, // slate dark trousers
+      color: 0x1e293b,
       roughness: 0.6,
       flatShading: true,
     });
 
     const matHelmet = new THREE.MeshStandardMaterial({
-      color: 0xe2e8f0, // pale tactical helmet
+      color: 0xe2e8f0,
       roughness: 0.3,
       metalness: 0.2,
       flatShading: true,
     });
 
     const matVisor = new THREE.MeshBasicMaterial({
-      color: 0x00f0c0, // glowing cyan visor
+      color: 0x00f0c0,
     });
 
     const matBoots = new THREE.MeshStandardMaterial({
@@ -136,13 +131,12 @@ export class PlayerController {
       metalness: 0.8,
     });
 
-    // 1. Torso
+    // Torso
     const torsoGeo = new THREE.BoxGeometry(0.55, 0.65, 0.35);
     this.torsoMesh = new THREE.Mesh(torsoGeo, matSuitBlue);
     this.torsoMesh.position.y = 1.05;
     this.characterGroup.add(this.torsoMesh);
 
-    // Explorer Backpack with glowing light
     const packGeo = new THREE.BoxGeometry(0.4, 0.5, 0.22);
     const backpack = new THREE.Mesh(packGeo, matDarkPants);
     backpack.position.set(0, 0.05, -0.25);
@@ -152,31 +146,27 @@ export class PlayerController {
     packLight.position.set(0, 0.15, -0.15);
     backpack.add(packLight);
 
-    // 2. Head & Helmet
+    // Head & Helmet
     const headGeo = new THREE.SphereGeometry(0.24, 12, 10);
     this.headMesh = new THREE.Mesh(headGeo, matHelmet);
     this.headMesh.position.set(0, 0.52, 0);
     this.torsoMesh.add(this.headMesh);
 
-    // Visor
     const visorGeo = new THREE.BoxGeometry(0.26, 0.12, 0.15);
     const visor = new THREE.Mesh(visorGeo, matVisor);
     visor.position.set(0, 0, 0.18);
     this.headMesh.add(visor);
 
-    // 3. Legs
+    // Legs
     const legGeo = new THREE.BoxGeometry(0.2, 0.65, 0.22);
-    // Left leg
     this.leftLegMesh = new THREE.Mesh(legGeo, matDarkPants);
     this.leftLegMesh.position.set(-0.16, 0.42, 0);
     this.characterGroup.add(this.leftLegMesh);
 
-    // Right leg
     this.rightLegMesh = new THREE.Mesh(legGeo, matDarkPants);
     this.rightLegMesh.position.set(0.16, 0.42, 0);
     this.characterGroup.add(this.rightLegMesh);
 
-    // Boots
     const bootGeo = new THREE.BoxGeometry(0.22, 0.2, 0.3);
     const bootL = new THREE.Mesh(bootGeo, matBoots);
     bootL.position.set(0, -0.32, 0.04);
@@ -186,19 +176,16 @@ export class PlayerController {
     bootR.position.set(0, -0.32, 0.04);
     this.rightLegMesh.add(bootR);
 
-    // 4. Arms
+    // Arms
     const armGeo = new THREE.BoxGeometry(0.16, 0.6, 0.18);
-    // Left arm
     this.leftArmMesh = new THREE.Mesh(armGeo, matSuitBlue);
     this.leftArmMesh.position.set(-0.36, 1.05, 0);
     this.characterGroup.add(this.leftArmMesh);
 
-    // Right arm (holding field compass!)
     this.rightArmMesh = new THREE.Mesh(armGeo, matSuitBlue);
     this.rightArmMesh.position.set(0.36, 1.05, 0);
     this.characterGroup.add(this.rightArmMesh);
 
-    // Brass Field Compass in Right Hand
     const compassBody = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.16, 0.04), matBrass);
     compassBody.position.set(0, -0.35, 0.12);
     compassBody.rotation.x = -Math.PI / 3;
@@ -224,7 +211,6 @@ export class PlayerController {
   public setCameraMode(mode: CameraMode) {
     this.cameraMode = mode;
     if (this.characterGroup) {
-      // In first-person mode, hide head/torso meshes so player's sightline is clear, keep arms/compass
       this.characterGroup.visible = mode !== 'first_person';
     }
   }
@@ -238,11 +224,8 @@ export class PlayerController {
 
   public applyLookDelta(deltaX: number, deltaY: number, isTouch: boolean = false) {
     const factor = isTouch ? 0.0035 * this.sensitivity : 0.0022 * this.sensitivity;
-
     this.yaw -= deltaX * factor;
     this.pitch += deltaY * factor;
-
-    // Clamp vertical orbit angle so camera stays behind character and doesn't invert
     this.pitch = Math.max(-0.3, Math.min(1.2, this.pitch));
   }
 
@@ -250,7 +233,6 @@ export class PlayerController {
     if (this.isRespawning) {
       this.respawnFadeAlpha = Math.min(1.0, this.respawnFadeAlpha + delta * 2.5);
       if (this.respawnFadeAlpha >= 1.0) {
-        // Safely respawn on solid ground
         this.position.set(this.lastCheckpoint.x, Math.max(4.2, this.lastCheckpoint.y), this.lastCheckpoint.z);
         this.velocity.set(0, 0, 0);
         this.isGrounded = true;
@@ -263,8 +245,6 @@ export class PlayerController {
     }
 
     const dt = Math.min(delta, 0.08);
-
-    // Movement relative to current third-person camera horizontal angle
     const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)).normalize();
     const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw)).normalize();
 
@@ -281,15 +261,14 @@ export class PlayerController {
       moveDir.normalize();
     }
 
-    // Horizontal acceleration & friction
-    const targetVx = moveDir.x * this.walkSpeed;
-    const targetVz = moveDir.z * this.walkSpeed;
+    const currentSpeed = this.input.sprint ? this.walkSpeed * this.sprintMultiplier : this.walkSpeed;
+    const targetVx = moveDir.x * currentSpeed;
+    const targetVz = moveDir.z * currentSpeed;
 
     const lerpFactor = this.isGrounded ? 12.0 * dt : 3.0 * dt;
     this.velocity.x += (targetVx - this.velocity.x) * Math.min(1, lerpFactor);
     this.velocity.z += (targetVz - this.velocity.z) * Math.min(1, lerpFactor);
 
-    // Jump handling
     if (this.input.jump && this.isGrounded) {
       this.velocity.y = this.jumpForce;
       this.isGrounded = false;
@@ -297,142 +276,108 @@ export class PlayerController {
       soundSystem.playJump();
     }
 
-    // Gravity
     this.velocity.y += this.gravity * dt;
 
-    // Proposed new position
     const nextPos = this.position.clone();
     nextPos.x += this.velocity.x * dt;
     nextPos.z += this.velocity.z * dt;
     nextPos.y += this.velocity.y * dt;
 
-    const wasGrounded = this.isGrounded;
-    this.checkCollisions(nextPos);
+    // Ground raycasting & floor snapping
+    const groundElevation = this.checkGroundCollision(nextPos);
 
-    if (!wasGrounded && this.isGrounded) {
-      soundSystem.playLand();
+    if (nextPos.y <= groundElevation) {
+      nextPos.y = groundElevation;
+      this.velocity.y = 0;
+      this.isGrounded = true;
+    } else {
+      if (this.isGrounded && nextPos.y - groundElevation < 0.35) {
+        nextPos.y = groundElevation;
+        this.velocity.y = 0;
+      } else {
+        this.isGrounded = false;
+      }
     }
 
-    // Fall-off check into the cloud sea abyss
-    if (this.position.y < -12.0 && !this.isRespawning) {
+    this.position.copy(nextPos);
+
+    // Void fall detection
+    if (this.position.y < -35 && !this.isRespawning) {
       this.triggerRespawn();
-      return;
     }
 
-    // Update 3D Character Position & Rotation
+    // Update 3D Character Model position and limb animation
+    this.updateCharacterAnimation(dt, isMoving, moveDir);
+
+    // Update camera depending on active camera mode
+    this.updateCamera(dt);
+  }
+
+  private checkGroundCollision(probePos: THREE.Vector3): number {
+    if (this.walkableMeshes.length === 0) {
+      return 4.2;
+    }
+
+    const rayOrigin = new THREE.Vector3(probePos.x, probePos.y + 1.2, probePos.z);
+    this.raycaster.set(rayOrigin, new THREE.Vector3(0, -1, 0));
+
+    const hits = this.raycaster.intersectObjects(this.walkableMeshes, true);
+    if (hits.length > 0) {
+      const topHit = hits[0].point.y;
+      return Math.max(topHit, 4.2);
+    }
+
+    return 4.2;
+  }
+
+  private updateCharacterAnimation(dt: number, isMoving: boolean, moveDir: THREE.Vector3) {
+    if (!this.characterGroup) return;
+
     this.characterGroup.position.copy(this.position);
 
     if (isMoving) {
-      // Rotate character to face movement direction smoothly
-      const targetAngle = Math.atan2(moveDir.x, moveDir.z);
-      this.characterGroup.rotation.y = targetAngle;
+      const targetCharAngle = Math.atan2(moveDir.x, moveDir.z);
+      this.characterGroup.rotation.y = targetCharAngle;
 
-      // Animate limb swinging
-      this.animTimer += dt * 10.0;
-      const swing = Math.sin(this.animTimer) * 0.55;
+      this.animTimer += dt * (this.input.sprint ? 14.0 : 8.5);
+      const legSwing = Math.sin(this.animTimer) * 0.45;
+      const armSwing = Math.cos(this.animTimer) * 0.4;
 
-      this.leftLegMesh.rotation.x = swing;
-      this.rightLegMesh.rotation.x = -swing;
-      this.leftArmMesh.rotation.x = -swing * 0.8;
-      this.rightArmMesh.rotation.x = swing * 0.4; // subtle swing while holding compass
+      this.leftLegMesh.rotation.x = legSwing;
+      this.rightLegMesh.rotation.x = -legSwing;
+      this.leftArmMesh.rotation.x = -armSwing;
+      this.rightArmMesh.rotation.x = armSwing * 0.3;
 
-      // Footstep sound
-      this.footstepTimer += dt * Math.hypot(this.velocity.x, this.velocity.z);
-      if (this.footstepTimer > 2.6) {
+      this.footstepTimer += dt;
+      const stepInterval = this.input.sprint ? 0.28 : 0.42;
+      if (this.footstepTimer > stepInterval && this.isGrounded) {
         this.footstepTimer = 0;
         soundSystem.playFootstep();
       }
     } else {
-      // Return limbs to idle
-      this.leftLegMesh.rotation.x *= 0.8;
-      this.rightLegMesh.rotation.x *= 0.8;
-      this.leftArmMesh.rotation.x *= 0.8;
-      this.rightArmMesh.rotation.x *= 0.8;
+      this.leftLegMesh.rotation.x = 0;
+      this.rightLegMesh.rotation.x = 0;
+      this.leftArmMesh.rotation.x = 0;
+      this.rightArmMesh.rotation.x = 0;
 
-      // Idle breathing sway
-      const idleTime = performance.now() * 0.002;
-      this.torsoMesh.position.y = 1.05 + Math.sin(idleTime) * 0.015;
+      // Rotate character with camera idle yaw
+      this.characterGroup.rotation.y = this.yaw + Math.PI;
+
+      // Subtle breathing idle
+      this.animTimer += dt * 2.0;
+      this.torsoMesh.position.y = 1.05 + Math.sin(this.animTimer) * 0.02;
     }
 
-    // Update Third-Person Camera
-    this.updateCamera(dt);
+    if (this.compassNeedleMesh) {
+      this.compassNeedleMesh.rotation.z = -this.yaw;
+    }
   }
 
-  /**
-   * Robust Collision Physics:
-   * Combines analytical platform floor boundaries with raycasting.
-   * Completely prevents falling through the floor or death loops!
-   */
-  private checkCollisions(nextPos: THREE.Vector3) {
-    // 1. Analytical Solid Floor Bounds for Platforms & Bridges:
-    // A. Main Observation Catwalk Platform:
-    // Extents: X from -8.2 to 8.2, Z from -7.2 to 7.2. Floor elevation is 4.2.
-    if (Math.abs(nextPos.x) <= 8.2 && nextPos.z >= -7.2 && nextPos.z <= 7.2) {
-      if (nextPos.y <= 4.2) {
-        this.position.x = nextPos.x;
-        this.position.z = nextPos.z;
-        this.position.y = 4.2;
-        this.velocity.y = 0;
-        this.isGrounded = true;
-        return;
-      }
-    }
-
-    // B. Walkable Elevated Sky-Bridge:
-    // Extents: X from -2.2 to 2.2, Z from -5.0 down to -48.0. Floor elevation is 4.2.
-    if (Math.abs(nextPos.x) <= 2.2 && nextPos.z <= -5.0 && nextPos.z >= -48.0) {
-      if (nextPos.y <= 4.2) {
-        this.position.x = nextPos.x;
-        this.position.z = nextPos.z;
-        this.position.y = 4.2;
-        this.velocity.y = 0;
-        this.isGrounded = true;
-        return;
-      }
-    }
-
-    // 2. High-tolerance Raycast downward from chest level
-    const rayOrigin = new THREE.Vector3(nextPos.x, nextPos.y + 1.8, nextPos.z);
-    this.raycaster.set(rayOrigin, new THREE.Vector3(0, -1, 0));
-    this.raycaster.far = 3.8;
-
-    if (this.walkableMeshes.length > 0) {
-      const hits = this.raycaster.intersectObjects(this.walkableMeshes, true);
-      if (hits.length > 0) {
-        const groundY = hits[0].point.y;
-        if (nextPos.y <= groundY + 0.1) {
-          this.position.x = nextPos.x;
-          this.position.z = nextPos.z;
-          this.position.y = groundY;
-          this.velocity.y = 0;
-          this.isGrounded = true;
-          return;
-        }
-      }
-    }
-
-    // Mid-air fall
-    this.isGrounded = false;
-    this.position.copy(nextPos);
-  }
-
-  /**
-   * Updates Camera based on selected CameraMode:
-   * - third_person: Orbiting trailing behind the character with smooth follow
-   * - first_person: Direct eye-level viewport through the explorer visor
-   * - second_person: Dramatic cinematic reverse perspective looking back at the character from front-angle
-   */
   private updateCamera(dt: number) {
     if (this.cameraMode === 'first_person') {
-      // First person eye level at 1.55m
-      const eyePos = new THREE.Vector3(
-        this.position.x,
-        this.position.y + 1.55,
-        this.position.z
-      );
+      const eyePos = new THREE.Vector3(this.position.x, this.position.y + 1.62, this.position.z);
       this.camera.position.copy(eyePos);
 
-      // Look direction from yaw and pitch
       const cosPitch = Math.cos(this.pitch);
       const lookTarget = new THREE.Vector3(
         eyePos.x - Math.sin(this.yaw) * cosPitch,
@@ -444,33 +389,22 @@ export class PlayerController {
     }
 
     if (this.cameraMode === 'second_person') {
-      // Second person: Cinematic reverse angle looking *at* the player character from the front
-      const frontDist = 3.8;
-      const target = new THREE.Vector3(
-        this.position.x,
-        this.position.y + 1.35,
-        this.position.z
-      );
-      // Place camera in front of player character
-      const frontX = this.position.x - Math.sin(this.yaw) * frontDist;
-      const frontY = this.position.y + 1.8 + Math.sin(this.pitch) * 1.5;
-      const frontZ = this.position.z - Math.cos(this.yaw) * frontDist;
-
+      // Observer View: frontal perspective looking back towards the player
+      const frontDist = 4.0;
+      const target = new THREE.Vector3(this.position.x, this.position.y + 1.35, this.position.z);
+      const frontX = this.position.x - Math.sin(this.yaw - 0.4) * frontDist;
+      const frontY = this.position.y + 2.2;
+      const frontZ = this.position.z - Math.cos(this.yaw - 0.4) * frontDist;
       const desiredPos = new THREE.Vector3(frontX, frontY, frontZ);
+
       this.currentCameraPos.lerp(desiredPos, Math.min(1.0, 14.0 * dt));
       this.camera.position.copy(this.currentCameraPos);
       this.camera.lookAt(target);
       return;
     }
 
-    // Default: Third-person orbit
-    const target = new THREE.Vector3(
-      this.position.x,
-      this.position.y + this.cameraTargetHeight,
-      this.position.z
-    );
-
-    // Calculate third-person camera offset based on yaw and pitch
+    // Default Third-Person Orbit View
+    const target = new THREE.Vector3(this.position.x, this.position.y + this.cameraTargetHeight, this.position.z);
     const cosPitch = Math.cos(this.pitch);
     const sinPitch = Math.sin(this.pitch);
 
@@ -478,13 +412,7 @@ export class PlayerController {
     const offsetY = sinPitch * this.cameraDistance;
     const offsetZ = Math.cos(this.yaw) * cosPitch * this.cameraDistance;
 
-    const desiredCameraPos = new THREE.Vector3(
-      target.x + offsetX,
-      target.y + offsetY,
-      target.z + offsetZ
-    );
-
-    // Smooth camera lag
+    const desiredCameraPos = new THREE.Vector3(target.x + offsetX, target.y + offsetY, target.z + offsetZ);
     this.currentCameraPos.lerp(desiredCameraPos, Math.min(1.0, 16.0 * dt));
     this.camera.position.copy(this.currentCameraPos);
     this.camera.lookAt(target);
@@ -500,11 +428,12 @@ export class PlayerController {
     const deg = Math.round(((((-this.yaw * 180) / Math.PI) % 360) + 360) % 360);
     const elev = Math.round(1420 + (this.position.y - 4.2) * 10);
     const temp = Math.round((18.4 - (this.position.y - 4.2) * 0.2) * 10) / 10;
-
     return {
       headingDegrees: deg,
       temperatureCelsius: temp,
       elevationMeters: elev,
+      timeOfDay: 'day',
+      timeLabel: 'SOLAR CYCLE: NORMAL',
     };
   }
 
