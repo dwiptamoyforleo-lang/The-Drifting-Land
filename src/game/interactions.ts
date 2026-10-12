@@ -171,8 +171,13 @@ export class InteractionManager {
     });
 
     // If close enough and player auto-picks fragment or presses interact
-    if (closestTarget !== this.currentTarget) {
-      this.currentTarget = closestTarget;
+    const targetChanged =
+      closestTarget?.id !== this.currentTarget?.id ||
+      closestTarget?.prompt !== this.currentTarget?.prompt;
+
+    // Keep the freshest target/action without re-rendering the React HUD every frame.
+    this.currentTarget = closestTarget;
+    if (targetChanged) {
       this.emitState();
     }
   }
