@@ -54,6 +54,8 @@ export class PlayerController {
   // Callbacks
   public onDamageTaken?: (amount: number, reason: string) => void;
   public onStatsChange?: () => void;
+  public getNearbyObserver?: () => { position: THREE.Vector3; name: string } | null;
+  public activeObserverName: string = '';
 
   // 3D Character Model Rig
   public characterGroup!: THREE.Group;
@@ -72,6 +74,18 @@ export class PlayerController {
   // Collision
   public walkableMeshes: THREE.Object3D[] = [];
   private raycaster: THREE.Raycaster;
+
+  // Scratch vector pool to completely eliminate GC allocations in game loop
+  private _forward: THREE.Vector3 = new THREE.Vector3();
+  private _right: THREE.Vector3 = new THREE.Vector3();
+  private _moveDir: THREE.Vector3 = new THREE.Vector3();
+  private _nextPos: THREE.Vector3 = new THREE.Vector3();
+  private _rayOrigin: THREE.Vector3 = new THREE.Vector3();
+  private _rayDir: THREE.Vector3 = new THREE.Vector3(0, -1, 0);
+  private _eyePos: THREE.Vector3 = new THREE.Vector3();
+  private _lookTarget: THREE.Vector3 = new THREE.Vector3();
+  private _camTarget: THREE.Vector3 = new THREE.Vector3();
+  private _desiredCameraPos: THREE.Vector3 = new THREE.Vector3();
 
   // Respawn
   public isRespawning: boolean = false;
@@ -101,6 +115,7 @@ export class PlayerController {
 
     this.raycaster = new THREE.Raycaster();
     this.raycaster.far = 4.0;
+    this.raycaster.firstHitOnly = true;
 
     this.buildCharacterModel();
     this.updateCamera(0.016);
@@ -264,20 +279,20 @@ export class PlayerController {
     }
 
     const dt = Math.min(delta, 0.08);
-    const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)).normalize();
-    const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw)).normalize();
+    this._forward.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)).normalize();
+    this._right.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw)).normalize();
 
-    const moveDir = new THREE.Vector3();
+    this._moveDir.set(0, 0, 0);
     if (Math.abs(this.input.moveForward) > 0.01) {
-      moveDir.addScaledVector(forward, this.input.moveForward);
+      this._moveDir.addScaledVector(this._forward, this.input.moveForward);
     }
     if (Math.abs(this.input.moveRight) > 0.01) {
-      moveDir.addScaledVector(right, this.input.moveRight);
+      this._moveDir.addScaledVector(this._right, this.input.moveRight);
     }
 
-    const isMoving = moveDir.lengthSq() > 0.01;
+    const isMoving = this._moveDir.lengthSq() > 0.01;
     if (isMoving) {
-      moveDir.normalize();
+      this._moveDir.normalize();
     }
 
     // Stamina & Sprint Logic
@@ -300,8 +315,8 @@ export class PlayerController {
 
     const effectiveWalkSpeed = this.walkSpeed * this.speedMultiplier;
     const currentSpeed = isSprintingNow ? effectiveWalkSpeed * this.sprintMultiplier : effectiveWalkSpeed;
-    const targetVx = moveDir.x * currentSpeed;
-    const targetVz = moveDir.z * currentSpeed;
+    const targetVx = this._moveDir.x * currentSpeed;
+    const targetVz = this._moveDir.z * currentSpeed;
 
     const lerpFactor = this.isGrounded ? 12.0 * dt : 3.0 * dt;
     this.velocity.x += (targetVx - this.velocity.x) * Math.min(1, lerpFactor);
@@ -327,17 +342,17 @@ export class PlayerController {
 
     this.velocity.y += this.gravity * dt;
 
-    const nextPos = this.position.clone();
-    nextPos.x += this.velocity.x * dt;
-    nextPos.z += this.velocity.z * dt;
-    nextPos.y += this.velocity.y * dt;
+    this._nextPos.copy(this.position);
+    this._nextPos.x += this.velocity.x * dt;
+    this._nextPos.z += this.velocity.z * dt;
+    this._nextPos.y += this.velocity.y * dt;
 
     // Ground raycasting & floor snapping
-    const groundElevation = this.checkGroundCollision(nextPos);
+    const groundElevation = this.checkGroundCollision(this._nextPos);
     const wasAirborne = !this.isGrounded;
 
-    if (nextPos.y <= groundElevation) {
-      nextPos.y = groundElevation;
+    if (this._nextPos.y <= groundElevation) {
+      this._nextPos.y = groundElevation;
       this.velocity.y = 0;
       this.isGrounded = true;
 
@@ -350,15 +365,15 @@ export class PlayerController {
       }
       this.prevAirVelocityY = 0;
     } else {
-      if (this.isGrounded && nextPos.y - groundElevation < 0.35) {
-        nextPos.y = groundElevation;
+      if (this.isGrounded && this._nextPos.y - groundElevation < 0.35) {
+        this._nextPos.y = groundElevation;
         this.velocity.y = 0;
       } else {
         this.isGrounded = false;
       }
     }
 
-    this.position.copy(nextPos);
+    this.position.copy(this._nextPos);
 
     // Void fall detection
     if (this.position.y < -35 && !this.isRespawning) {
@@ -366,7 +381,7 @@ export class PlayerController {
     }
 
     // Update 3D Character Model position and limb animation
-    this.updateCharacterAnimation(dt, isMoving, moveDir);
+    this.updateCharacterAnimation(dt, isMoving, this._moveDir);
 
     // Update camera depending on active camera mode
     this.updateCamera(dt);
@@ -377,10 +392,10 @@ export class PlayerController {
       return 4.2;
     }
 
-    const rayOrigin = new THREE.Vector3(probePos.x, probePos.y + 1.2, probePos.z);
-    this.raycaster.set(rayOrigin, new THREE.Vector3(0, -1, 0));
+    this._rayOrigin.set(probePos.x, probePos.y + 1.2, probePos.z);
+    this.raycaster.set(this._rayOrigin, this._rayDir);
 
-    const hits = this.raycaster.intersectObjects(this.walkableMeshes, true);
+    const hits = this.raycaster.intersectObjects(this.walkableMeshes, false);
     if (hits.length > 0) {
       const topHit = hits[0].point.y;
       return Math.max(topHit, 4.2);
@@ -434,36 +449,47 @@ export class PlayerController {
 
   private updateCamera(dt: number) {
     if (this.cameraMode === 'first_person') {
-      const eyePos = new THREE.Vector3(this.position.x, this.position.y + 1.62, this.position.z);
-      this.camera.position.copy(eyePos);
+      this._eyePos.set(this.position.x, this.position.y + 1.62, this.position.z);
+      this.camera.position.copy(this._eyePos);
 
       const cosPitch = Math.cos(this.pitch);
-      const lookTarget = new THREE.Vector3(
-        eyePos.x - Math.sin(this.yaw) * cosPitch,
-        eyePos.y + Math.sin(this.pitch),
-        eyePos.z - Math.cos(this.yaw) * cosPitch
+      this._lookTarget.set(
+        this._eyePos.x - Math.sin(this.yaw) * cosPitch,
+        this._eyePos.y + Math.sin(this.pitch),
+        this._eyePos.z - Math.cos(this.yaw) * cosPitch
       );
-      this.camera.lookAt(lookTarget);
+      this.camera.lookAt(this._lookTarget);
       return;
     }
 
     if (this.cameraMode === 'second_person') {
-      // Observer View: frontal perspective looking back towards the player
-      const frontDist = 4.0;
-      const target = new THREE.Vector3(this.position.x, this.position.y + 1.35, this.position.z);
-      const frontX = this.position.x - Math.sin(this.yaw - 0.4) * frontDist;
-      const frontY = this.position.y + 2.2;
-      const frontZ = this.position.z - Math.cos(this.yaw - 0.4) * frontDist;
-      const desiredPos = new THREE.Vector3(frontX, frontY, frontZ);
+      const observer = this.getNearbyObserver ? this.getNearbyObserver() : null;
+      this._camTarget.set(this.position.x, this.position.y + 1.25, this.position.z);
 
-      this.currentCameraPos.lerp(desiredPos, Math.min(1.0, 14.0 * dt));
-      this.camera.position.copy(this.currentCameraPos);
-      this.camera.lookAt(target);
+      if (observer) {
+        // Perspective of nearby observing creature or NPC looking directly at player
+        this.activeObserverName = observer.name;
+        this.currentCameraPos.lerp(observer.position, Math.min(1.0, 9.0 * dt));
+        this.camera.position.copy(this.currentCameraPos);
+        this.camera.lookAt(this._camTarget);
+      } else {
+        // Dedicated observer camera in front of the player looking back toward them
+        this.activeObserverName = 'Front Recon Drone';
+        const frontDist = 4.2;
+        const frontX = this.position.x - Math.sin(this.yaw) * frontDist;
+        const frontY = this.position.y + 2.0;
+        const frontZ = this.position.z - Math.cos(this.yaw) * frontDist;
+        this._desiredCameraPos.set(frontX, frontY, frontZ);
+
+        this.currentCameraPos.lerp(this._desiredCameraPos, Math.min(1.0, 12.0 * dt));
+        this.camera.position.copy(this.currentCameraPos);
+        this.camera.lookAt(this._camTarget);
+      }
       return;
     }
 
     // Default Third-Person Orbit View
-    const target = new THREE.Vector3(this.position.x, this.position.y + this.cameraTargetHeight, this.position.z);
+    this._camTarget.set(this.position.x, this.position.y + this.cameraTargetHeight, this.position.z);
     const cosPitch = Math.cos(this.pitch);
     const sinPitch = Math.sin(this.pitch);
 
@@ -471,10 +497,10 @@ export class PlayerController {
     const offsetY = sinPitch * this.cameraDistance;
     const offsetZ = Math.cos(this.yaw) * cosPitch * this.cameraDistance;
 
-    const desiredCameraPos = new THREE.Vector3(target.x + offsetX, target.y + offsetY, target.z + offsetZ);
-    this.currentCameraPos.lerp(desiredCameraPos, Math.min(1.0, 16.0 * dt));
+    this._desiredCameraPos.set(this._camTarget.x + offsetX, this._camTarget.y + offsetY, this._camTarget.z + offsetZ);
+    this.currentCameraPos.lerp(this._desiredCameraPos, Math.min(1.0, 16.0 * dt));
     this.camera.position.copy(this.currentCameraPos);
-    this.camera.lookAt(target);
+    this.camera.lookAt(this._camTarget);
   }
 
   public triggerRespawn() {

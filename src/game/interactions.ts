@@ -55,120 +55,161 @@ export class InteractionManager {
       }
     }
 
-    // Check distances to interactables
-    const playerPos = this.player.position;
+    // Check distances to interactables using zero-allocation scalar math
+    const px = this.player.position.x;
+    const py = this.player.position.y;
+    const pz = this.player.position.z;
+
     let closestTarget: InteractableObject | null = null;
-    let minDistance = this.interactionRange;
+    let minDistanceSq = this.interactionRange * this.interactionRange;
 
     // 1. Checkpoints
-    this.world.checkpoints.forEach(cp => {
-      const cpPos = new THREE.Vector3(...cp.position);
-      const dist = playerPos.distanceTo(cpPos);
-      if (dist < minDistance) {
-        minDistance = dist;
+    const checkpoints = this.world.checkpoints;
+    for (let i = 0; i < checkpoints.length; i++) {
+      const cp = checkpoints[i];
+      const pos = cp.position;
+      const dx = px - pos[0];
+      const dy = py - pos[1];
+      const dz = pz - pos[2];
+      const distSq = dx * dx + dy * dy + dz * dz;
+      if (distSq < minDistanceSq) {
+        minDistanceSq = distSq;
+        const dist = Math.sqrt(distSq);
         closestTarget = {
           id: cp.id,
           type: 'checkpoint',
           title: cp.name,
           prompt: cp.activated ? 'Checkpoint Active' : `Activate ${cp.name}`,
           distance: dist,
-          position: cpPos,
+          position: new THREE.Vector3(pos[0], pos[1], pos[2]),
           onInteract: () => this.handleCheckpointInteract(cp.id),
         };
       }
-    });
+    }
 
     // 2. NPCs / Survivors
-    this.world.npcs.forEach(npc => {
-      const npcPos = new THREE.Vector3(...npc.position);
-      const dist = playerPos.distanceTo(npcPos);
-      if (dist < minDistance) {
-        minDistance = dist;
+    const npcs = this.world.npcs;
+    for (let i = 0; i < npcs.length; i++) {
+      const npc = npcs[i];
+      const nx = npc.mesh ? npc.mesh.position.x : npc.position[0];
+      const ny = npc.mesh ? npc.mesh.position.y : npc.position[1];
+      const nz = npc.mesh ? npc.mesh.position.z : npc.position[2];
+      const dx = px - nx;
+      const dy = py - ny;
+      const dz = pz - nz;
+      const distSq = dx * dx + dy * dy + dz * dz;
+      if (distSq < minDistanceSq) {
+        minDistanceSq = distSq;
+        const dist = Math.sqrt(distSq);
         closestTarget = {
           id: npc.id,
           type: 'npc',
           title: npc.name,
-          prompt: `Speak with ${npc.name}`,
+          prompt: `Speak with ${npc.name} (${npc.role})`,
           distance: dist,
-          position: npcPos,
+          position: new THREE.Vector3(nx, ny, nz),
           onInteract: () => this.handleNpcInteract(npc.id),
         };
       }
-    });
+    }
 
     // 3. Harvestable Resources
-    this.world.resources.forEach(res => {
-      if (res.collected) return;
-      const resPos = new THREE.Vector3(...res.position);
-      const dist = playerPos.distanceTo(resPos);
-      if (dist < minDistance) {
-        minDistance = dist;
+    const resources = this.world.resources;
+    for (let i = 0; i < resources.length; i++) {
+      const res = resources[i];
+      if (res.collected) continue;
+      const pos = res.position;
+      const dx = px - pos[0];
+      const dy = py - pos[1];
+      const dz = pz - pos[2];
+      const distSq = dx * dx + dy * dy + dz * dz;
+      if (distSq < minDistanceSq) {
+        minDistanceSq = distSq;
+        const dist = Math.sqrt(distSq);
         closestTarget = {
           id: res.id,
           type: 'resource',
           title: res.name,
           prompt: `Harvest ${res.name} (+${res.coinValue}c)`,
           distance: dist,
-          position: resPos,
+          position: new THREE.Vector3(pos[0], pos[1], pos[2]),
           onInteract: () => this.handleResourceInteract(res.id),
         };
       }
-    });
+    }
 
     // 4. Anchors
-    this.world.anchors.forEach(anchor => {
-      const anchorPos = new THREE.Vector3(...anchor.position);
-      const dist = playerPos.distanceTo(anchorPos);
-      if (dist < minDistance) {
-        minDistance = dist;
+    const anchors = this.world.anchors;
+    for (let i = 0; i < anchors.length; i++) {
+      const anchor = anchors[i];
+      const pos = anchor.position;
+      const dx = px - pos[0];
+      const dy = py - pos[1];
+      const dz = pz - pos[2];
+      const distSq = dx * dx + dy * dy + dz * dz;
+      if (distSq < minDistanceSq) {
+        minDistanceSq = distSq;
+        const dist = Math.sqrt(distSq);
         closestTarget = {
           id: anchor.id,
           type: 'anchor',
           title: anchor.name,
           prompt: anchor.activated ? 'Anchor Harmonized' : 'Attune Ancient Anchor',
           distance: dist,
-          position: anchorPos,
+          position: new THREE.Vector3(pos[0], pos[1], pos[2]),
           onInteract: () => this.handleAnchorInteract(anchor.id),
         };
       }
-    });
+    }
 
     // 5. World Fragments
-    this.world.fragments.forEach(frag => {
-      if (frag.collected) return;
-      const fragPos = new THREE.Vector3(...frag.position);
-      const dist = playerPos.distanceTo(fragPos);
-      if (dist < minDistance) {
-        minDistance = dist;
+    const fragments = this.world.fragments;
+    for (let i = 0; i < fragments.length; i++) {
+      const frag = fragments[i];
+      if (frag.collected) continue;
+      const pos = frag.position;
+      const dx = px - pos[0];
+      const dy = py - pos[1];
+      const dz = pz - pos[2];
+      const distSq = dx * dx + dy * dy + dz * dz;
+      if (distSq < minDistanceSq) {
+        minDistanceSq = distSq;
+        const dist = Math.sqrt(distSq);
         closestTarget = {
           id: frag.id,
           type: 'fragment',
           title: frag.name,
           prompt: 'Absorb World Fragment',
           distance: dist,
-          position: fragPos,
+          position: new THREE.Vector3(pos[0], pos[1], pos[2]),
           onInteract: () => this.handleFragmentInteract(frag.id),
         };
       }
-    });
+    }
 
     // 6. Inscription Steles
-    this.world.inscriptions.forEach(insc => {
-      const inscPos = new THREE.Vector3(...insc.position);
-      const dist = playerPos.distanceTo(inscPos);
-      if (dist < minDistance) {
-        minDistance = dist;
+    const inscriptions = this.world.inscriptions;
+    for (let i = 0; i < inscriptions.length; i++) {
+      const insc = inscriptions[i];
+      const pos = insc.position;
+      const dx = px - pos[0];
+      const dy = py - pos[1];
+      const dz = pz - pos[2];
+      const distSq = dx * dx + dy * dy + dz * dz;
+      if (distSq < minDistanceSq) {
+        minDistanceSq = distSq;
+        const dist = Math.sqrt(distSq);
         closestTarget = {
           id: insc.id,
           type: 'inscription',
           title: insc.title,
           prompt: 'Read Ancient Inscription',
           distance: dist,
-          position: inscPos,
+          position: new THREE.Vector3(pos[0], pos[1], pos[2]),
           onInteract: () => this.handleInscriptionInteract(insc.id),
         };
       }
-    });
+    }
 
     // If close enough and player auto-picks fragment or presses interact
     const currentTargetId = this.currentTarget ? this.currentTarget.id : null;

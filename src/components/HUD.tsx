@@ -397,6 +397,14 @@ export const HUD: React.FC<HUDProps> = ({
         </div>
       </div>
 
+      {/* Second-Person Observer View Indicator Badge */}
+      {player.cameraMode === 'second_person' && (
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-cyan-950/85 border border-cyan-400/60 backdrop-blur-md text-[10px] font-mono text-cyan-200 flex items-center gap-1.5 shadow-[0_0_15px_rgba(6,182,212,0.35)] animate-pulse pointer-events-none z-20">
+          <Eye className="w-3.5 h-3.5 text-cyan-400" />
+          <span>OBSERVER VIEW: {player.activeObserverName || 'Observation Matrix'}</span>
+        </div>
+      )}
+
       {/* Top-Right Quests & Quick Nav */}
       <div className="absolute top-4 right-5 flex items-start gap-2.5 pointer-events-auto">
         <div

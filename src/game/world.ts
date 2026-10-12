@@ -19,6 +19,8 @@ import {
   WorldNPC,
   HarvestableResource,
   WorldCheckpoint,
+  WorldWildlife,
+  TreasureCache,
 } from './types';
 
 export class WorldManager {
@@ -33,6 +35,8 @@ export class WorldManager {
   public npcs: WorldNPC[] = [];
   public resources: HarvestableResource[] = [];
   public checkpoints: WorldCheckpoint[] = [];
+  public wildlife: WorldWildlife[] = [];
+  public treasures: TreasureCache[] = [];
 
   // Flying speeders
   public speeders: THREE.Group[] = [];
@@ -1000,50 +1004,246 @@ export class WorldManager {
   }
 
   /**
-   * 11. Living World NPCs & Survivors
+   * 11. Living World NPCs & Settlement Population
+   * Includes Village Leader, Merchants, Settlers, Scouts, Travelers with campfire,
+   * Lost Explorers, Ancient Guardians, Dimension Researchers, and Wandering Traders.
    */
   private buildNPCs() {
-    const matSuit = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.5, metalness: 0.5 });
-    const matVisor = new THREE.MeshBasicMaterial({ color: 0x06b6d4 });
+    const matSuitDark = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.5, metalness: 0.5 });
     const matPlating = new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.3, metalness: 0.8 });
+    const matGoldPlating = new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.2, metalness: 0.9, emissive: 0x78350f, emissiveIntensity: 0.3 });
+    const matEmeraldSuit = new THREE.MeshStandardMaterial({ color: 0x065f46, roughness: 0.4, metalness: 0.4 });
+    const matNomadCloak = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.8, metalness: 0.1 });
+    const matGolemStone = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.7, metalness: 0.3 });
+    const matGolemMoss = new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.6, metalness: 0.1 });
+    const matScavengerFeather = new THREE.MeshStandardMaterial({ color: 0x3b82f6, roughness: 0.5, metalness: 0.3 });
 
-    const createNpcMesh = (visorColorHex: number) => {
-      const npcGroup = new THREE.Group();
+    const createHumanoidMesh = (suitMat: THREE.Material, visorColorHex: number, scale: number = 1.0) => {
+      const group = new THREE.Group();
+      group.scale.set(scale, scale, scale);
+
       // Legs
       const legGeo = new THREE.BoxGeometry(0.24, 0.85, 0.26);
-      const legL = new THREE.Mesh(legGeo, matSuit);
+      const legL = new THREE.Mesh(legGeo, suitMat);
       legL.position.set(-0.16, 0.425, 0);
-      const legR = new THREE.Mesh(legGeo, matSuit);
+      const legR = new THREE.Mesh(legGeo, suitMat);
       legR.position.set(0.16, 0.425, 0);
-      npcGroup.add(legL, legR);
+      group.add(legL, legR);
 
       // Torso
       const torsoGeo = new THREE.BoxGeometry(0.55, 0.75, 0.35);
       const torso = new THREE.Mesh(torsoGeo, matPlating);
       torso.position.set(0, 1.2, 0);
-      npcGroup.add(torso);
+      group.add(torso);
 
       // Head with glowing visor
       const headGeo = new THREE.BoxGeometry(0.36, 0.38, 0.38);
-      const head = new THREE.Mesh(headGeo, matSuit);
+      const head = new THREE.Mesh(headGeo, suitMat);
       head.position.set(0, 1.75, 0);
       const visorGeo = new THREE.BoxGeometry(0.3, 0.14, 0.12);
       const visorMat = new THREE.MeshBasicMaterial({ color: visorColorHex });
       const visor = new THREE.Mesh(visorGeo, visorMat);
       visor.position.set(0, 0.02, 0.16);
       head.add(visor);
-      npcGroup.add(head);
+      group.add(head);
 
-      // Shoulder antenna beacon
-      const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.4, 4), this.matNeonAmber);
-      antenna.position.set(0.22, 1.6, -0.1);
-      npcGroup.add(antenna);
-
-      return npcGroup;
+      return { group, head, torso, legL, legR };
     };
 
-    // NPC 1: Explorer Vael (Observation Deck)
-    const vaelMesh = createNpcMesh(0x22d3ee);
+    // -------------------------------------------------------------
+    // 1. OVERSEER BENNETT (Village Leader / Settlement Governor)
+    // -------------------------------------------------------------
+    const bennettRig = createHumanoidMesh(matGoldPlating, 0xf59e0b, 1.05);
+    const bennettMesh = bennettRig.group;
+    bennettMesh.position.set(0.0, 4.2, -1.0);
+    this.scene.add(bennettMesh);
+
+    // Overseer Command Staff with rotating ring
+    const staffGroup = new THREE.Group();
+    staffGroup.position.set(0.38, 0.9, 0.2);
+    const staffPole = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.025, 1.8, 6), matGoldPlating);
+    staffPole.position.y = 0.9;
+    const staffOrb = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 8), this.matNeonAmber);
+    staffOrb.position.y = 1.85;
+    const staffRing = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.02, 6, 12), this.matNeonCyan);
+    staffRing.position.y = 1.85;
+    staffGroup.add(staffPole, staffOrb, staffRing);
+    bennettMesh.add(staffGroup);
+
+    this.animatables.push({
+      update: (time) => {
+        staffRing.rotation.x = time * 2.0;
+        staffRing.rotation.y = time * 1.5;
+        bennettRig.torso.position.y = 1.2 + Math.sin(time * 1.8) * 0.015;
+      }
+    });
+
+    this.npcs.push({
+      id: 'npc-bennett',
+      name: 'Overseer Bennett',
+      role: 'Haven Settlement Governor',
+      settlement: 'Aero-Haven Sanctuary',
+      behavior: 'standing',
+      position: [0.0, 4.2, -1.0],
+      dialogue: {
+        id: 'bennett-greeting',
+        speaker: 'Overseer Bennett',
+        title: 'Haven Settlement Governor',
+        greeting: 'Welcome to Aero-Haven Command Dais, Pathfinder. Our atmospheric domes are holding, but island strata are fracturing into the lower turquoise aether. How fare our quantum anchors?',
+        options: [
+          {
+            label: 'What is our colony settlement status?',
+            response: 'We have survived three solar fractures. Our botanists are growing lumenvine crops, but we require all three quantum anchors harmonized to stabilize the drifting bedrock.',
+            rewardCoins: 60,
+            rewardXp: 80,
+          },
+          {
+            label: 'Where can I trade or resupply?',
+            response: 'Trader Oakhaven maintains our primary supply depot on the western promenade. He accepts Drift Coins for tools, medical salves, and emergency survival gear.',
+          },
+          {
+            label: 'I will keep exploring the archipelago.',
+            response: 'Stay vigilant upon the catwalks. The abyss below offers no footing.',
+          },
+        ],
+      },
+      mesh: bennettMesh,
+    });
+
+    // -------------------------------------------------------------
+    // 2. TRADER OAKHAVEN (Aero-Haven General Outfitter & Merchant)
+    // -------------------------------------------------------------
+    const oakhavenRig = createHumanoidMesh(matSuitDark, 0x38bdf8);
+    const oakhavenMesh = oakhavenRig.group;
+    oakhavenMesh.position.set(-6.0, 4.2, 5.0);
+    oakhavenMesh.rotation.y = 0.6;
+    this.scene.add(oakhavenMesh);
+
+    // Merchant Market Stall Awning & Crates
+    const stallGroup = new THREE.Group();
+    stallGroup.position.set(-6.0, 4.2, 5.0);
+    // Awning roof
+    const awning = new THREE.Mesh(
+      new THREE.BoxGeometry(2.4, 0.08, 1.8),
+      new THREE.MeshStandardMaterial({ color: 0x0284c7, roughness: 0.6 })
+    );
+    awning.position.set(0, 2.5, 0);
+    awning.rotation.x = 0.15;
+    // Awning posts
+    const postGeo = new THREE.CylinderGeometry(0.04, 0.04, 2.5, 6);
+    const postMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.7 });
+    const p1 = new THREE.Mesh(postGeo, postMat); p1.position.set(-1.0, 1.25, -0.7);
+    const p2 = new THREE.Mesh(postGeo, postMat); p2.position.set(1.0, 1.25, -0.7);
+    const p3 = new THREE.Mesh(postGeo, postMat); p3.position.set(-1.0, 1.25, 0.7);
+    const p4 = new THREE.Mesh(postGeo, postMat); p4.position.set(1.0, 1.25, 0.7);
+    // Crates on table
+    const table = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.8, 0.6), this.matSteelDark);
+    table.position.set(0, 0.4, 0.5);
+    const crateA = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.35, 0.35), this.matBrassPipes);
+    crateA.position.set(-0.4, 0.95, 0.5);
+    const crateB = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.3), this.matSteelGrate);
+    crateB.position.set(0.35, 0.92, 0.5);
+    // Hanging lantern
+    const stallLantern = new THREE.PointLight(0x38bdf8, 1.4, 5);
+    stallLantern.position.set(0, 2.2, 0);
+    stallGroup.add(awning, p1, p2, p3, p4, table, crateA, crateB, stallLantern);
+    this.scene.add(stallGroup);
+
+    this.npcs.push({
+      id: 'npc-oakhaven',
+      name: 'Trader Oakhaven',
+      role: 'Aero-Haven General Outfitter',
+      settlement: 'Aero-Haven Marketplace',
+      isTrader: true,
+      traderId: 'trader-haven',
+      behavior: 'standing',
+      position: [-6.0, 4.2, 5.0],
+      dialogue: {
+        id: 'oakhaven-greeting',
+        speaker: 'Trader Oakhaven',
+        title: 'Aero-Haven General Outfitter',
+        greeting: 'Ah, voyager! Stocking up before braving the sky-bridges? I have got fresh recovery salves, kinetic suits, and emergency survival gear straight from the Haven fabrication bay.',
+        options: [
+          {
+            label: '[TRADE] Browse Haven Outfitter Goods & Gear',
+            response: 'Opening Haven marketplace. Spend your Drift Coins wisely, friend!',
+            openShop: true,
+            openTradeTraderId: 'trader-haven',
+          },
+          {
+            label: 'What gear do you recommend for exploring?',
+            response: 'Equip the Kinetic Exo-Weave Suit and Magnetic Thruster Boots. They reduce fall impact damage by 40% and boost your sprint speed significantly.',
+            rewardCoins: 35,
+            rewardXp: 50,
+          },
+          {
+            label: 'How do I earn more Drift Coins?',
+            response: 'Complete explorer quests, discover uncharted sectors, activate ancient shrines, or sell harvested crystals and salvaged relics directly to me.',
+          },
+        ],
+      },
+      mesh: oakhavenMesh,
+    });
+
+    // -------------------------------------------------------------
+    // 3. SETTLER THORNE (Hydroponic Cultivator / Harvester)
+    // -------------------------------------------------------------
+    const thorneRig = createHumanoidMesh(matEmeraldSuit, 0x10b981);
+    const thorneMesh = thorneRig.group;
+    thorneMesh.position.set(5.5, 4.2, 3.5);
+    thorneMesh.rotation.y = -1.4;
+    this.scene.add(thorneMesh);
+
+    // Planter box with glowing Lumenvine sprouts
+    const planterBox = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.45, 0.8), this.matSteelDark);
+    planterBox.position.set(5.5, 4.4, 3.0);
+    const sprout1 = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.08, 0.5, 5), this.matNeonGreen);
+    sprout1.position.set(5.2, 4.8, 3.0);
+    const sprout2 = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.08, 0.65, 5), this.matNeonCyan);
+    sprout2.position.set(5.8, 4.9, 3.0);
+    this.scene.add(planterBox, sprout1, sprout2);
+
+    this.animatables.push({
+      update: (time) => {
+        sprout1.scale.y = 1.0 + Math.sin(time * 2.0) * 0.08;
+        sprout2.scale.y = 1.0 + Math.cos(time * 1.8) * 0.08;
+        thorneRig.torso.rotation.x = Math.sin(time * 1.5) * 0.05;
+      }
+    });
+
+    this.npcs.push({
+      id: 'npc-thorne',
+      name: 'Settler Thorne',
+      role: 'Haven Hydroponic Cultivator',
+      settlement: 'Haven Botanical Terraces',
+      behavior: 'tending',
+      position: [5.5, 4.2, 3.5],
+      dialogue: {
+        id: 'thorne-greeting',
+        speaker: 'Settler Thorne',
+        title: 'Haven Hydroponic Cultivator',
+        greeting: 'Careful around the Lumenvine sprouts! These bioluminescent fibers provide both illumination and breathable atmospheric oxygen for the whole colony.',
+        options: [
+          {
+            label: 'Can I use Lumenvine fibers for crafting?',
+            response: 'Certainly! Combine Lumenvine fibers with glass crystals or alloy fragments in the Fabricator [C key] to forge a portable Lumenvine Lantern.',
+            rewardCoins: 45,
+            rewardXp: 60,
+          },
+          {
+            label: 'How do these plants survive at this altitude?',
+            response: 'They drink planetary aether directly from Kepler-94d auroras. Their glowing sap possesses immense regenerative properties.',
+          },
+        ],
+      },
+      mesh: thorneMesh,
+    });
+
+    // -------------------------------------------------------------
+    // 4. EXPLORER VAEL (Aero-Vanguard Pathfinder)
+    // -------------------------------------------------------------
+    const vaelRig = createHumanoidMesh(matSuitDark, 0x22d3ee);
+    const vaelMesh = vaelRig.group;
     vaelMesh.position.set(-3.5, 4.2, 2.5);
     vaelMesh.rotation.y = 0.8;
     this.scene.add(vaelMesh);
@@ -1065,6 +1265,8 @@ export class WorldManager {
       id: 'npc-vael',
       name: 'Explorer Vael',
       role: 'Aero-Vanguard Pathfinder',
+      settlement: 'Aero-Haven Outpost',
+      behavior: 'scanning',
       position: [-3.5, 4.2, 2.5],
       dialogue: {
         id: 'vael-greeting',
@@ -1090,8 +1292,193 @@ export class WorldManager {
       mesh: vaelMesh,
     });
 
-    // NPC 2: Scholar Silas (Mid-Bridge Transit Outpost)
-    const silasMesh = createNpcMesh(0xa855f7);
+    // -------------------------------------------------------------
+    // 5. TRAVELER JORAH (Sitting Nomad by Warm Campfire)
+    // -------------------------------------------------------------
+    const jorahRig = createHumanoidMesh(matNomadCloak, 0xf97316, 0.95);
+    const jorahMesh = jorahRig.group;
+    jorahMesh.position.set(8.0, 4.6, -18.0);
+    jorahMesh.rotation.y = -2.4;
+    // Lower rig to seated pose
+    jorahRig.legL.rotation.x = Math.PI / 2;
+    jorahRig.legR.rotation.x = Math.PI / 2;
+    jorahRig.legL.position.set(-0.16, 0.2, 0.25);
+    jorahRig.legR.position.set(0.16, 0.2, 0.25);
+    jorahRig.torso.position.y = 0.65;
+    jorahRig.head.position.y = 1.2;
+    this.scene.add(jorahMesh);
+
+    // Warm Campfire Hearth
+    const fireGroup = new THREE.Group();
+    fireGroup.position.set(8.0, 4.6, -18.0);
+    // Stone ring
+    const stoneRingGeo = new THREE.TorusGeometry(0.45, 0.1, 6, 10);
+    stoneRingGeo.rotateX(Math.PI / 2);
+    const fireStones = new THREE.Mesh(stoneRingGeo, matPlating);
+    fireStones.position.y = 0.08;
+    // Burning logs
+    const logGeo = new THREE.CylinderGeometry(0.04, 0.05, 0.6, 5);
+    const logMat = new THREE.MeshStandardMaterial({ color: 0x451a03, roughness: 0.9 });
+    const log1 = new THREE.Mesh(logGeo, logMat); log1.rotation.set(0.4, 0.4, 0.8); log1.position.y = 0.12;
+    const log2 = new THREE.Mesh(logGeo, logMat); log2.rotation.set(-0.4, -0.4, -0.8); log2.position.y = 0.12;
+    // Animated Flame Cone
+    const flameMat = new THREE.MeshBasicMaterial({ color: 0xf97316 });
+    const flameCone = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.55, 6), flameMat);
+    flameCone.position.y = 0.35;
+    // Inner fire glow light
+    const fireLight = new THREE.PointLight(0xf59e0b, 2.4, 7);
+    fireLight.position.y = 0.45;
+    fireGroup.add(fireStones, log1, log2, flameCone, fireLight);
+    this.scene.add(fireGroup);
+
+    this.animatables.push({
+      update: (time) => {
+        flameCone.scale.set(
+          1.0 + Math.sin(time * 12.0) * 0.15,
+          1.0 + Math.cos(time * 14.0) * 0.2,
+          1.0 + Math.sin(time * 10.0) * 0.15
+        );
+        fireLight.intensity = 2.0 + Math.sin(time * 15.0) * 0.5;
+      }
+    });
+
+    this.npcs.push({
+      id: 'npc-jorah',
+      name: 'Traveler Jorah',
+      role: 'Wandering Nomad & Storyteller',
+      settlement: 'Mid-Bridge Campfire Haven',
+      behavior: 'sitting',
+      position: [8.0, 4.6, -18.0],
+      dialogue: {
+        id: 'jorah-greeting',
+        speaker: 'Traveler Jorah',
+        title: 'Wandering Nomad',
+        greeting: 'Pull up a stone and warm your hands, voyager. The high altitude wind is bitter today. Rest a spell by this campfire—its warmth soothes kinetic bruises and rapidly restores your stamina.',
+        options: [
+          {
+            label: 'Tell me stories of the ancient sky cities.',
+            response: 'Before the Great Drift shattered the crust, all citadels were bound in one celestial ring. Travelers rode gliders upon the golden solar thermal tides without fear of falling.',
+            rewardCoins: 50,
+            rewardXp: 75,
+          },
+          {
+            label: 'How does this fire burn in thin aether?',
+            response: 'Fed with slow-burning Aether-resin moss. Stand close whenever you are exhausted to regenerate your health and stamina!',
+            rewardCoins: 30,
+            rewardXp: 40,
+          },
+        ],
+      },
+      mesh: jorahMesh,
+    });
+
+    // -------------------------------------------------------------
+    // 6. SCOUT TALIA (Horizon Lookout & Cloud Recon)
+    // -------------------------------------------------------------
+    const taliaRig = createHumanoidMesh(matSuitDark, 0x06b6d4, 0.98);
+    const taliaMesh = taliaRig.group;
+    taliaMesh.position.set(-16.0, 5.4, -12.0);
+    taliaMesh.rotation.y = 1.8;
+    this.scene.add(taliaMesh);
+
+    // Binocular Rangefinder Visor
+    const binoGeo = new THREE.BoxGeometry(0.32, 0.12, 0.18);
+    const bino = new THREE.Mesh(binoGeo, this.matNeonCyan);
+    bino.position.set(0, 1.76, 0.22);
+    taliaMesh.add(bino);
+
+    this.npcs.push({
+      id: 'npc-talia',
+      name: 'Scout Talia',
+      role: 'Horizon Lookout & Storm Scout',
+      settlement: 'Western Cantilever Outlook',
+      behavior: 'guarding',
+      position: [-16.0, 5.4, -12.0],
+      dialogue: {
+        id: 'talia-greeting',
+        speaker: 'Scout Talia',
+        title: 'Horizon Lookout',
+        greeting: 'Keep a firm hand on the rail! Down in the turquoise cloud sea, I can spot migrating Cloudgrazers and a pod of Storm Rays gliding past Sector 03.',
+        options: [
+          {
+            label: 'Are there any hazards on the horizon?',
+            response: 'Watch for gravitational shearing near the bridge edges. If you slip into the void, your quantum recall matrix will reconstitute you at the last synchronized checkpoint.',
+            rewardCoins: 40,
+            rewardXp: 60,
+          },
+          {
+            label: 'What is that grand spire in the clouds?',
+            response: 'The Drifting Citadel! Its gates remain locked until the triad of Quantum Anchors are attuned into celestial resonance.',
+          },
+        ],
+      },
+      mesh: taliaMesh,
+    });
+
+    // -------------------------------------------------------------
+    // 7. LOST SCOUT CORIN (Stranded Explorer with Distress Beacon)
+    // -------------------------------------------------------------
+    const corinRig = createHumanoidMesh(matSuitDark, 0xeab308, 0.95);
+    const corinMesh = corinRig.group;
+    corinMesh.position.set(-10.5, 3.8, -32.0);
+    corinMesh.rotation.y = 0.5;
+    // Kneeling posture
+    corinRig.legL.rotation.x = Math.PI / 2.2;
+    corinRig.legR.rotation.x = Math.PI / 1.5;
+    corinRig.torso.position.y = 0.75;
+    corinRig.torso.rotation.x = 0.2;
+    corinRig.head.position.y = 1.25;
+    this.scene.add(corinMesh);
+
+    // Sparking Distress Beacon
+    const beaconBox = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.35, 0.2), this.matBrassPipes);
+    beaconBox.position.set(-10.2, 3.95, -31.8);
+    const beaconLight = new THREE.PointLight(0xeab308, 1.8, 6);
+    beaconLight.position.set(-10.2, 4.3, -31.8);
+    this.scene.add(beaconBox, beaconLight);
+
+    this.animatables.push({
+      update: (time) => {
+        // Intermittent distress pulse
+        beaconLight.intensity = Math.sin(time * 8.0) > 0.2 ? 3.0 : 0.2;
+      }
+    });
+
+    this.npcs.push({
+      id: 'npc-corin',
+      name: 'Lost Scout Corin',
+      role: 'Stranded Scout',
+      settlement: 'Fractured Lower Catwalks',
+      behavior: 'stranded',
+      position: [-10.5, 3.8, -32.0],
+      dialogue: {
+        id: 'corin-greeting',
+        speaker: 'Lost Scout Corin',
+        title: 'Stranded Scout',
+        greeting: '*Crackling suit speaker* Help! My suit thruster sputtered when the catwalk fractured. I am stranded down here on this severed catwalk ledge!',
+        options: [
+          {
+            label: 'Hold on, take this emergency recovery salve!',
+            response: 'Thank the stars! That stabilized my bio-vitals. Here—take this cache of 150 Drift Coins and this rare Quantum Anchor Key for saving my life!',
+            rewardCoins: 150,
+            rewardXp: 200,
+          },
+          {
+            label: 'Can you climb back up to Haven?',
+            response: 'Yes, now that my knee servo is patched, I can use my reserve grapple once the winds die down. Thank you, voyager!',
+            rewardCoins: 50,
+            rewardXp: 50,
+          },
+        ],
+      },
+      mesh: corinMesh,
+    });
+
+    // -------------------------------------------------------------
+    // 8. SCHOLAR SILAS (Citadel Astrogator)
+    // -------------------------------------------------------------
+    const silasRig = createHumanoidMesh(matSuitDark, 0xa855f7);
+    const silasMesh = silasRig.group;
     silasMesh.position.set(2.5, 4.6, -24.0);
     silasMesh.rotation.y = -2.2;
     this.scene.add(silasMesh);
@@ -1112,6 +1499,8 @@ export class WorldManager {
       id: 'npc-silas',
       name: 'Scholar Silas',
       role: 'Citadel Astrogator',
+      settlement: 'Mid-Bridge Astronomical Outpost',
+      behavior: 'scanning',
       position: [2.5, 4.6, -24.0],
       dialogue: {
         id: 'silas-greeting',
@@ -1138,8 +1527,11 @@ export class WorldManager {
       mesh: silasMesh,
     });
 
-    // NPC 3: Mechanic Kira (Geodesic Research Lab)
-    const kiraMesh = createNpcMesh(0x10b981);
+    // -------------------------------------------------------------
+    // 9. MECHANIC KIRA (Sub-Relay Engineer)
+    // -------------------------------------------------------------
+    const kiraRig = createHumanoidMesh(matSuitDark, 0x10b981);
+    const kiraMesh = kiraRig.group;
     kiraMesh.position.set(22.0, 4.4, -36.0);
     kiraMesh.rotation.y = -1.2;
     this.scene.add(kiraMesh);
@@ -1148,6 +1540,8 @@ export class WorldManager {
       id: 'npc-kira',
       name: 'Mechanic Kira',
       role: 'Sub-Relay Engineer',
+      settlement: 'Geodesic Biosphere Lab Entry',
+      behavior: 'standing',
       position: [22.0, 4.4, -36.0],
       dialogue: {
         id: 'kira-greeting',
@@ -1168,6 +1562,268 @@ export class WorldManager {
         ],
       },
       mesh: kiraMesh,
+    });
+
+    // -------------------------------------------------------------
+    // 10. THE WANDERING MOSSKEEPER (Ancient Arboreal Golem & Trader)
+    // -------------------------------------------------------------
+    const mosskeeperGroup = new THREE.Group();
+    mosskeeperGroup.position.set(18.0, 4.4, -30.0);
+    // Golem bulky stone torso
+    const golemTorso = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.2, 0.7), matGolemStone);
+    golemTorso.position.y = 1.7;
+    // Mossy overgrown shoulders
+    const golemMoss = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.35, 0.8), matGolemMoss);
+    golemMoss.position.y = 2.25;
+    // Glowing emerald heart core
+    const heartCore = new THREE.Mesh(new THREE.OctahedronGeometry(0.2, 0), this.matNeonGreen);
+    heartCore.position.set(0, 1.7, 0.38);
+    // Golem stone head
+    const golemHead = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.45, 0.5), matGolemStone);
+    golemHead.position.set(0, 2.55, 0);
+    const golemEyeL = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 6), this.matNeonGreen);
+    golemEyeL.position.set(-0.14, 2.55, 0.26);
+    const golemEyeR = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 6), this.matNeonGreen);
+    golemEyeR.position.set(0.14, 2.55, 0.26);
+    // Heavy stone legs
+    const golemLegL = new THREE.Mesh(new THREE.BoxGeometry(0.42, 1.1, 0.45), matGolemStone);
+    golemLegL.position.set(-0.35, 0.55, 0);
+    const golemLegR = new THREE.Mesh(new THREE.BoxGeometry(0.42, 1.1, 0.45), matGolemStone);
+    golemLegR.position.set(0.35, 0.55, 0);
+    // Sprouting flower on shoulder
+    const flower = new THREE.Mesh(new THREE.SphereGeometry(0.12, 6, 6), this.matNeonMagenta);
+    flower.position.set(-0.55, 2.45, 0.1);
+    mosskeeperGroup.add(golemTorso, golemMoss, heartCore, golemHead, golemEyeL, golemEyeR, golemLegL, golemLegR, flower);
+    this.scene.add(mosskeeperGroup);
+
+    // Wandering patrol logic along garden span
+    let mossDir = 1;
+    let mossProgress = 0.0;
+    const mossP1 = new THREE.Vector3(18.0, 4.4, -30.0);
+    const mossP2 = new THREE.Vector3(24.0, 4.4, -42.0);
+
+    this.animatables.push({
+      update: (_time, delta) => {
+        mossProgress += delta * 0.08 * mossDir;
+        if (mossProgress >= 1.0) {
+          mossProgress = 1.0;
+          mossDir = -1;
+        } else if (mossProgress <= 0.0) {
+          mossProgress = 0.0;
+          mossDir = 1;
+        }
+        mosskeeperGroup.position.lerpVectors(mossP1, mossP2, mossProgress);
+        // Face movement direction
+        mosskeeperGroup.rotation.y = mossDir > 0 ? -1.0 : 2.14;
+        // Walking sway
+        const walkSwing = Math.sin(mossProgress * 24.0) * 0.25;
+        golemLegL.rotation.x = walkSwing;
+        golemLegR.rotation.x = -walkSwing;
+      }
+    });
+
+    this.npcs.push({
+      id: 'npc-mosskeeper',
+      name: 'The Mosskeeper',
+      role: 'Ancient Arboreal Golem',
+      settlement: 'Geodesic Biosphere Gardens',
+      isTrader: true,
+      traderId: 'trader-mosskeeper',
+      behavior: 'patrolling',
+      patrolPoints: [[18.0, 4.4, -30.0], [24.0, 4.4, -42.0]],
+      position: [18.0, 4.4, -30.0],
+      dialogue: {
+        id: 'mosskeeper-greeting',
+        speaker: 'The Mosskeeper',
+        title: 'Ancient Arboreal Golem',
+        greeting: '*Deep rumbling stone-wood voice* Little sprout of the metallic towers... The gardens still breathe. Do you seek the ancient seeds and botanical elixirs of the drifting earth?',
+        options: [
+          {
+            label: '[TRADE] Browse Botanical Elixirs & Luminescent Flora',
+            response: 'The earth still whispers in my bark. Examine my botanical harvest.',
+            openShop: true,
+            openTradeTraderId: 'trader-mosskeeper',
+          },
+          {
+            label: 'Who grew these geodesic gardens?',
+            response: 'The First Cultivators before the Great Drift. I tend their blooming branches across the centuries.',
+            rewardCoins: 50,
+            rewardXp: 80,
+          },
+        ],
+      },
+      mesh: mosskeeperGroup,
+    });
+
+    // -------------------------------------------------------------
+    // 11. THE DRIFT COLLECTOR (Nomadic Avian Scrap Broker)
+    // -------------------------------------------------------------
+    const collectorRig = createHumanoidMesh(matScavengerFeather, 0x38bdf8, 1.02);
+    const collectorMesh = collectorRig.group;
+    collectorMesh.position.set(-14.0, 5.0, -26.0);
+    collectorMesh.rotation.y = 0.9;
+    this.scene.add(collectorMesh);
+
+    // Heavy salvage sack overflowing with metal pipes and gears
+    const sack = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.8, 0.5), matNomadCloak);
+    sack.position.set(0, 1.1, -0.42);
+    const scrapBit1 = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.6, 6), this.matBrassPipes);
+    scrapBit1.position.set(0.18, 1.6, -0.4);
+    scrapBit1.rotation.z = 0.4;
+    collectorMesh.add(sack, scrapBit1);
+
+    this.npcs.push({
+      id: 'npc-collector',
+      name: 'The Drift Collector',
+      role: 'Nomadic Aviary Scavenger',
+      settlement: 'Catwalk Scaffolding Outpost',
+      isTrader: true,
+      traderId: 'trader-collector',
+      behavior: 'standing',
+      position: [-14.0, 5.0, -26.0],
+      dialogue: {
+        id: 'collector-greeting',
+        speaker: 'The Drift Collector',
+        title: 'Nomadic Aviary Scavenger',
+        greeting: '*Chuckle-squawk* Clinking alloys! Shiny fragments! You step right up to the Drift Collector! Anything that fell from the citadels, I have got cataloged and priced!',
+        options: [
+          {
+            label: '[TRADE] Browse Salvaged Relics & Scrap Alloys',
+            response: 'Shiny coins for shiny fragments! Let us deal, voyager!',
+            openShop: true,
+            openTradeTraderId: 'trader-collector',
+          },
+          {
+            label: 'Where do you find all these parts?',
+            response: 'I scavenge the shattered underbelly of the sky catwalks. If a courier drops a shipment, it becomes my inventory!',
+            rewardCoins: 40,
+            rewardXp: 50,
+          },
+        ],
+      },
+      mesh: collectorMesh,
+    });
+
+    // -------------------------------------------------------------
+    // 12. DIMENSION RESEARCHER ZEPHYR (Chrono & Void Specialist)
+    // -------------------------------------------------------------
+    const zephyrRig = createHumanoidMesh(matSuitDark, 0xa855f7, 1.0);
+    const zephyrMesh = zephyrRig.group;
+    zephyrMesh.position.set(0.0, 5.0, -56.0);
+    zephyrMesh.rotation.y = 3.14;
+    this.scene.add(zephyrMesh);
+
+    // Floating concentric Chrono-Rings
+    const ring1 = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.02, 6, 16), this.matNeonMagenta);
+    ring1.position.set(0, 1.4, 0.4);
+    const ring2 = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.02, 6, 16), this.matNeonCyan);
+    ring2.position.set(0, 1.4, 0.4);
+    zephyrMesh.add(ring1, ring2);
+
+    this.animatables.push({
+      update: (time) => {
+        ring1.rotation.x = time * 2.2;
+        ring1.rotation.y = time * 1.6;
+        ring2.rotation.x = -time * 1.8;
+        ring2.rotation.z = time * 2.5;
+      }
+    });
+
+    this.npcs.push({
+      id: 'npc-zephyr',
+      name: 'Dimension Researcher Zephyr',
+      role: 'Spacetime Resonator Specialist',
+      settlement: 'Citadel Sanctum Perimeter',
+      behavior: 'scanning',
+      position: [0.0, 5.0, -56.0],
+      dialogue: {
+        id: 'zephyr-greeting',
+        speaker: 'Researcher Zephyr',
+        title: 'Spacetime Resonator Specialist',
+        greeting: 'The spacetime curvature around this sector is bending! We are standing at the threshold of a dimensional fracture. Can you hear the harmonic hum of the Citadel?',
+        options: [
+          {
+            label: 'What occurs during the Red Moon phenomenon?',
+            response: 'The planetary gravitational matrix aligns directly with Kepler-94d iron core. Dimensional boundaries turn permeable, exposing rare relics and lunar dust.',
+            rewardCoins: 80,
+            rewardXp: 120,
+          },
+          {
+            label: 'How can I unlock alternate dimensions?',
+            response: 'Attune all three quantum anchors and synchronize your dimensional matrix via the Navigation menu.',
+          },
+        ],
+      },
+      mesh: zephyrMesh,
+    });
+
+    // -------------------------------------------------------------
+    // 13. ANCIENT GUARDIAN AEON (Monumental Stone Sentinel)
+    // -------------------------------------------------------------
+    const aeonGroup = new THREE.Group();
+    aeonGroup.position.set(0.0, 5.2, -68.0);
+    aeonGroup.scale.set(1.4, 1.4, 1.4);
+    // Monumental Guardian Stone Torso
+    const aeonTorso = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.4, 0.8), matGolemStone);
+    aeonTorso.position.y = 1.9;
+    // Runic Chest Glyph Plaque (cyan emissive)
+    const runicChest = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.6, 0.84), this.matNeonCyan);
+    runicChest.position.set(0, 1.9, 0);
+    // Massive Stone Pauldrons
+    const pauldronL = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.5, 0.7), matGoldPlating);
+    pauldronL.position.set(-0.85, 2.4, 0);
+    const pauldronR = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.5, 0.7), matGoldPlating);
+    pauldronR.position.set(0.85, 2.4, 0);
+    // Sentinel Head with slit eye visor
+    const aeonHead = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.6), matGolemStone);
+    aeonHead.position.set(0, 2.85, 0);
+    const aeonVisor = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.12, 0.64), this.matNeonCyan);
+    aeonVisor.position.set(0, 2.85, 0);
+    // Towering Energy Poleaxe
+    const poleaxe = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 3.8, 6), this.matBrassPipes);
+    poleaxe.position.set(0.85, 1.9, 0.4);
+    const poleaxeBlade = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.7, 0.5), this.matNeonCyan);
+    poleaxeBlade.position.set(0.85, 3.4, 0.65);
+    aeonGroup.add(aeonTorso, runicChest, pauldronL, pauldronR, aeonHead, aeonVisor, poleaxe, poleaxeBlade);
+    this.scene.add(aeonGroup);
+
+    this.animatables.push({
+      update: (time) => {
+        // Runic pulse
+        const pulse = 0.8 + Math.sin(time * 2.0) * 0.2;
+        runicChest.scale.set(1.0, 1.0, 1.0 + Math.sin(time * 3.0) * 0.02);
+        poleaxeBlade.position.y = 3.4 + Math.sin(time * 2.0) * 0.03;
+      }
+    });
+
+    this.npcs.push({
+      id: 'npc-guardian-aeon',
+      name: 'Ancient Guardian Aeon',
+      role: 'Citadel Sanctum Sentinel',
+      settlement: 'Drifting Citadel Portal Gateway',
+      behavior: 'guarding',
+      position: [0.0, 5.2, -68.0],
+      dialogue: {
+        id: 'aeon-greeting',
+        speaker: 'Ancient Guardian Aeon',
+        title: 'Citadel Sanctum Sentinel',
+        greeting: '*A colossal resonant voice echoes inside your mind* MORTAL TRAVELER. YOU STAND BEFORE THE THRESHOLD OF THE DRIFTING CITADEL SANCTUM. STATE YOUR INTENT.',
+        options: [
+          {
+            label: 'I seek to restore harmony to the Drifting World.',
+            response: 'THE ARCHIPELAGO HAS WEPT FOR CENTURIES. HARMONIZE THE THREE QUANTUM ANCHORS. ONLY WHEN ALL THREE BEAMS REACH THE HEAVENS SHALL THE CITADEL CORE REVEAL ITS TRUTHS.',
+            rewardCoins: 100,
+            rewardXp: 150,
+          },
+          {
+            label: 'Who carved your stone frame?',
+            response: 'THOSE WHO MASTERED GRAVITATION BEFORE THE SEPARATION. WE WERE LEFT AS SENTINELS TO PRESERVE THE HARMONIC HEART.',
+            rewardCoins: 50,
+            rewardXp: 75,
+          },
+        ],
+      },
+      mesh: aeonGroup,
     });
   }
 
@@ -1549,9 +2205,21 @@ export class WorldManager {
     });
   }
 
-  public update(time: number, delta: number) {
+  public update(time: number, delta: number, playerPos?: THREE.Vector3) {
     for (let i = 0; i < this.animatables.length; i++) {
       this.animatables[i].update(time, delta);
+    }
+
+    // NPC smooth facing reaction to player proximity (< 6.5m)
+    if (playerPos) {
+      for (const npc of this.npcs) {
+        if (!npc.mesh || npc.behavior === 'patrolling') continue;
+        const dist = npc.mesh.position.distanceTo(playerPos);
+        if (dist < 6.5) {
+          const targetAngle = Math.atan2(playerPos.x - npc.mesh.position.x, playerPos.z - npc.mesh.position.z);
+          npc.mesh.rotation.y = THREE.MathUtils.lerp(npc.mesh.rotation.y, targetAngle, Math.min(1.0, 4.0 * delta));
+        }
+      }
     }
 
     // Progressive Day-Night Cycle (120 seconds for full loop, unless locked)

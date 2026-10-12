@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { MessageSquare, X, ChevronRight, Award, Coins, Sparkles, UserCheck } from 'lucide-react';
+import { MessageSquare, X, ChevronRight, Award, Coins, Sparkles, UserCheck, ShoppingBag } from 'lucide-react';
 import { DialogueNode, DialogueOption } from '../game/types';
 import { soundSystem } from '../game/audio';
 
@@ -93,16 +93,27 @@ export const DialogueModal: React.FC<DialogueModalProps> = ({
               className="w-full text-left p-3.5 rounded-xl bg-slate-900/70 hover:bg-cyan-950/40 border border-slate-800 hover:border-cyan-500/50 transition-all flex items-center justify-between group cursor-pointer"
             >
               <div className="flex items-center gap-2.5">
-                <ChevronRight className="w-4 h-4 text-cyan-400 group-hover:translate-x-1 transition-transform" />
+                {opt.openShop ? (
+                  <ShoppingBag className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform" />
+                ) : (
+                  <ChevronRight className="w-4 h-4 text-cyan-400 group-hover:translate-x-1 transition-transform" />
+                )}
                 <span className="text-xs font-medium text-slate-200 group-hover:text-cyan-200 font-sans">
                   {opt.label}
                 </span>
               </div>
-              {(opt.rewardXp || opt.rewardCoins) && (
-                <span className="text-[10px] text-amber-300 bg-amber-950/50 border border-amber-500/30 px-2 py-0.5 rounded font-mono shrink-0">
-                  REWARD
-                </span>
-              )}
+              <div className="flex items-center gap-1.5 shrink-0">
+                {opt.openShop && (
+                  <span className="text-[10px] text-amber-300 bg-amber-950/60 border border-amber-500/40 px-2 py-0.5 rounded font-mono font-bold">
+                    TRADE
+                  </span>
+                )}
+                {(opt.rewardXp || opt.rewardCoins) && (
+                  <span className="text-[10px] text-emerald-300 bg-emerald-950/50 border border-emerald-500/30 px-2 py-0.5 rounded font-mono">
+                    REWARD
+                  </span>
+                )}
+              </div>
             </button>
           ))}
         </div>

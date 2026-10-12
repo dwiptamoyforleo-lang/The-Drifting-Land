@@ -153,7 +153,7 @@ export interface InscriptionLore {
 
 export interface InteractableObject {
   id: string;
-  type: 'anchor' | 'fragment' | 'inscription' | 'citadel_core' | 'npc' | 'resource' | 'checkpoint';
+  type: 'anchor' | 'fragment' | 'inscription' | 'citadel_core' | 'npc' | 'resource' | 'checkpoint' | 'wildlife' | 'trader' | 'treasure';
   title: string;
   prompt: string;
   distance: number;
@@ -168,6 +168,8 @@ export interface DialogueOption {
   rewardCoins?: number;
   rewardXp?: number;
   questTriggerId?: string;
+  openShop?: boolean;
+  openTradeTraderId?: string;
 }
 
 export interface DialogueNode {
@@ -182,8 +184,37 @@ export interface WorldNPC {
   id: string;
   name: string;
   role: string;
+  settlement?: string;
+  isTrader?: boolean;
+  traderId?: string;
   position: [number, number, number];
   dialogue: DialogueNode;
+  mesh?: THREE.Object3D;
+  behavior?: 'standing' | 'sitting' | 'patrolling' | 'tending' | 'guarding' | 'scanning' | 'stranded';
+  patrolPoints?: [number, number, number][];
+}
+
+export interface WorldWildlife {
+  id: string;
+  name: string;
+  species: 'cloudgrazer' | 'emberfox' | 'glasswing' | 'mossback' | 'storm_ray' | 'glowhare' | 'rift_stalker' | 'moon_deer';
+  description: string;
+  position: [number, number, number];
+  homePosition: [number, number, number];
+  behavior: 'grazing' | 'wandering' | 'resting' | 'fleeing' | 'hopping' | 'soaring';
+  isNocturnal?: boolean;
+  isLunar?: boolean;
+  mesh?: THREE.Object3D;
+  studied: boolean;
+}
+
+export interface TreasureCache {
+  id: string;
+  name: string;
+  position: [number, number, number];
+  coins: number;
+  rewardItemId?: string;
+  opened: boolean;
   mesh?: THREE.Object3D;
 }
 
@@ -208,6 +239,22 @@ export interface WorldCheckpoint {
   light?: THREE.PointLight;
 }
 
+export interface ShopItem {
+  id: string;
+  name: string;
+  description: string;
+  category: ItemCategory;
+  price: number;
+  icon: string;
+  rarity?: ItemRarity;
+  stock?: number;
+  requiredQuestId?: string;
+  requiredAnchorCount?: number;
+  requiresNight?: boolean;
+  requiresRedMoon?: boolean;
+  traderId?: string;
+}
+
 export interface GameProgress {
   activatedAnchors: string[];
   collectedFragments: string[];
@@ -228,6 +275,9 @@ export interface GameProgress {
   };
   hotbar?: (string | null)[]; // 6 slot item IDs
   completedQuests: string[];
+  openedTreasures?: string[];
+  studiedWildlife?: string[];
+  discoveredSettlements?: string[];
   redMoonWitnessed: boolean;
 }
 

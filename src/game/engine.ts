@@ -112,6 +112,40 @@ export class GameEngine {
       if (this.onStatsUpdate) this.onStatsUpdate(this.player.getPlayerStats());
     };
 
+    // Second-person observer hook: finds closest observing NPC or creature within 22m
+    this.player.getNearbyObserver = () => {
+      const pPos = this.player.position;
+      let closest: { position: THREE.Vector3; name: string } | null = null;
+      let minDist = 22.0;
+
+      for (const npc of this.world.npcs) {
+        const nPos = npc.mesh ? npc.mesh.position : new THREE.Vector3(...npc.position);
+        const d = pPos.distanceTo(nPos);
+        if (d < minDist && d > 1.2) {
+          minDist = d;
+          closest = {
+            position: nPos.clone().add(new THREE.Vector3(0, 1.7, 0)),
+            name: `${npc.name} (${npc.role})`,
+          };
+        }
+      }
+
+      for (const w of this.world.wildlife) {
+        const wPos = w.mesh ? w.mesh.position : new THREE.Vector3(...w.position);
+        const d = pPos.distanceTo(wPos);
+        if (d < minDist && d > 1.5) {
+          minDist = d;
+          const eyeH = w.species === 'cloudgrazer' ? 2.8 : 1.3;
+          closest = {
+            position: wPos.clone().add(new THREE.Vector3(0, eyeH, 0)),
+            name: `${w.name} (${w.species})`,
+          };
+        }
+      }
+
+      return closest;
+    };
+
     this.threads = new ThreadManager(this.scene);
     this.interactions = new InteractionManager(this.world, this.threads, this.player);
   }
@@ -181,7 +215,17 @@ export class GameEngine {
 
       if (this.onRespawnEffect) this.onRespawnEffect(this.player.respawnFadeAlpha);
 
-      this.world.update(elapsedTime, delta);
+      this.world.update(elapsedTime, delta, this.player.position);
+
+      // Campfire rest healing near Traveler Jorah's rest camp ([8.0, 4.6, -18.0])
+      const campfireDist = this.player.position.distanceTo(new THREE.Vector3(8.0, 4.6, -18.0));
+      if (campfireDist < 3.8 && !this.player.isRespawning) {
+        if (this.player.health < this.player.maxHealth || this.player.stamina < this.player.maxStamina) {
+          this.player.heal(delta * 5.0);
+          this.player.restoreStamina(delta * 18.0);
+        }
+      }
+
       this.threads.update(elapsedTime, delta);
       this.interactions.update(delta);
     }

@@ -64,6 +64,7 @@ export default function App() {
   const [showInventory, setShowInventory] = useState<boolean>(false);
   const [showCrafting, setShowCrafting] = useState<boolean>(false);
   const [showShop, setShowShop] = useState<boolean>(false);
+  const [selectedTraderId, setSelectedTraderId] = useState<string>('trader-all');
   const [showCredits, setShowCredits] = useState<boolean>(false);
   const [showMap, setShowMap] = useState<boolean>(false);
   const [isLoadingLevel, setIsLoadingLevel] = useState<boolean>(false);
@@ -449,7 +450,23 @@ export default function App() {
 
     engine.interactions.onNpcTalk = (dialogue) => {
       setQuests((prev) =>
-        prev.map((q) => (q.id === 'quest-survivors' ? { ...q, currentCount: Math.min(q.targetCount, q.currentCount + 1), completed: q.currentCount + 1 >= q.targetCount } : q))
+        prev.map((q) => {
+          if (q.id === 'quest-survivors') {
+            const nextCount = Math.min(q.targetCount, q.currentCount + 1);
+            return { ...q, currentCount: nextCount, completed: nextCount >= q.targetCount };
+          }
+          if (q.id === 'quest-haven' && (dialogue.speaker.includes('Bennett') || dialogue.speaker.includes('Oakhaven'))) {
+            const nextCount = Math.min(q.targetCount, q.currentCount + 1);
+            return { ...q, currentCount: nextCount, completed: nextCount >= q.targetCount };
+          }
+          if (q.id === 'quest-lost-scout' && dialogue.speaker.includes('Corin')) {
+            return { ...q, currentCount: 1, completed: true };
+          }
+          if (q.id === 'quest-guardian' && dialogue.speaker.includes('Aeon')) {
+            return { ...q, currentCount: 1, completed: true };
+          }
+          return q;
+        })
       );
     };
 
@@ -566,6 +583,40 @@ export default function App() {
     soundSystem.playFragmentCollected();
   };
 
+  const handleSellItem = (itemId: string, quantity: number, earnings: number) => {
+    setUserProfile((prev) => {
+      const nextCoins = (prev.coins || 0) + earnings;
+      const next = { ...prev, coins: nextCoins };
+      saveUserProfile(next);
+      return next;
+    });
+    setProgress((prev) => {
+      let updatedInv = [...(prev.inventory || [])];
+      const existing = updatedInv.find((i) => i.id === itemId);
+      if (existing) {
+        const remaining = existing.quantity - quantity;
+        if (remaining > 0) {
+          updatedInv = updatedInv.map((i) => (i.id === itemId ? { ...i, quantity: remaining } : i));
+        } else {
+          updatedInv = updatedInv.filter((i) => i.id !== itemId);
+        }
+      }
+      const nextProgress = {
+        ...prev,
+        inventory: updatedInv,
+        coins: (prev.coins || 0) + earnings,
+      };
+      saveProgress(nextProgress);
+      return nextProgress;
+    });
+    if (engineRef.current) {
+      engineRef.current.interactions.showToast(
+        'TRANSACTION COMPLETE',
+        `Sold cargo for +${earnings} Drift Coins.`
+      );
+    }
+  };
+
   const handleSelectDimension = (dimId: number) => {
     setCurrentDimension(dimId);
     setShowDimensions(false);
@@ -651,6 +702,13 @@ export default function App() {
         saveProgress(next);
         return next;
       });
+    }
+
+    if (option.openShop) {
+      setSelectedTraderId(option.openTradeTraderId || 'trader-all');
+      setShowShop(true);
+      setActiveDialogue(null);
+      if (engineRef.current) engineRef.current.interactions.closeDialogue();
     }
   }, []);
 
@@ -813,7 +871,11 @@ export default function App() {
         <ShopModal
           userProfile={userProfile}
           inventory={progress.inventory || []}
+          timeOfDay={telemetry.timeOfDay}
+          anchorCount={progress.activatedAnchors.length}
+          initialTraderId={selectedTraderId || 'trader-all'}
           onBuyItem={handleBuyItem}
+          onSellItem={handleSellItem}
           onClose={() => setShowShop(false)}
         />
       )}
