@@ -129,13 +129,15 @@ export class ThreadManager {
     // Pulse existing threads gently
     const pulse = 0.65 + Math.sin(time * 3.2) * 0.25;
 
-    this.activeThreads.forEach(thread => {
+    const numThreads = this.activeThreads.length;
+    for (let i = 0; i < numThreads; i++) {
+      const thread = this.activeThreads[i];
       if (thread.lineMesh instanceof THREE.Line) {
         const mat = thread.lineMesh.material as THREE.LineBasicMaterial;
         mat.opacity = pulse;
       }
       thread.light.intensity = 1.0 + Math.sin(time * 4.0) * 0.4;
-    });
+    }
 
     // Handle resonance sky flare decay
     if (this.resonanceAnimTimer > 0) {

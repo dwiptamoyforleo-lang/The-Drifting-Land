@@ -73,7 +73,7 @@ interface HUDProps {
   onHotbarUse?: (slotIndex: number) => void;
 }
 
-export const HUD: React.FC<HUDProps> = ({
+const HUDComponent: React.FC<HUDProps> = ({
   player,
   progress,
   settings,
@@ -85,6 +85,7 @@ export const HUD: React.FC<HUDProps> = ({
   respawnAlpha,
   stats,
   telemetry,
+  showFps = false,
   onPause,
   onOpenJournal,
   onOpenQuests,
@@ -100,7 +101,6 @@ export const HUD: React.FC<HUDProps> = ({
   const joystickThumbRef = useRef<HTMLDivElement>(null);
   const joystickTouchIdRef = useRef<number | null>(null);
   const joystickCenterRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
-  const [joystickPos, setJoystickPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
   const lookTouchIdRef = useRef<number | null>(null);
   const lastLookPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -134,7 +134,9 @@ export const HUD: React.FC<HUDProps> = ({
           clampedX = (dx / dist) * maxDist;
           clampedY = (dy / dist) * maxDist;
         }
-        setJoystickPos({ x: clampedX, y: clampedY });
+        if (joystickThumbRef.current) {
+          joystickThumbRef.current.style.transform = `translate(${clampedX}px, ${clampedY}px)`;
+        }
         player.input.moveForward = -clampedY / maxDist;
         player.input.moveRight = clampedX / maxDist;
         break;
@@ -147,7 +149,9 @@ export const HUD: React.FC<HUDProps> = ({
     for (let i = 0; i < e.changedTouches.length; i++) {
       if (e.changedTouches[i].identifier === joystickTouchIdRef.current) {
         joystickTouchIdRef.current = null;
-        setJoystickPos({ x: 0, y: 0 });
+        if (joystickThumbRef.current) {
+          joystickThumbRef.current.style.transform = 'translate(0px, 0px)';
+        }
         player.input.moveForward = 0;
         player.input.moveRight = 0;
         break;
@@ -303,6 +307,17 @@ export const HUD: React.FC<HUDProps> = ({
           </div>
         )}
       </div>
+
+      {/* Realtime Performance Telemetry (when Show FPS is enabled) */}
+      {showFps && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-black/85 border border-teal-500/40 text-[10px] font-mono text-teal-300 flex items-center gap-2 backdrop-blur-md shadow-lg pointer-events-none z-30">
+          <span className="font-bold text-emerald-400">{stats.fps} FPS</span>
+          <span className="text-slate-500">|</span>
+          <span className="text-cyan-300">{stats.drawCalls} calls</span>
+          <span className="text-slate-500">|</span>
+          <span className="text-slate-300">{stats.triangles.toLocaleString()} tris</span>
+        </div>
+      )}
 
       {/* Top-Left: Player Title & Survival Stats (Health, Stamina, Location) */}
       <div className="absolute top-4 left-5 pointer-events-auto flex flex-col gap-2">
@@ -640,7 +655,7 @@ export const HUD: React.FC<HUDProps> = ({
         <div
           ref={joystickThumbRef}
           style={{
-            transform: `translate(${joystickPos.x}px, ${joystickPos.y}px)`,
+            transform: 'translate(0px, 0px)',
           }}
           className="w-12 h-12 rounded-full bg-gradient-to-tr from-cyan-600 to-teal-400 shadow-[0_0_12px_rgba(6,182,212,0.6)] border border-white/50 pointer-events-none transition-transform duration-75"
         />
@@ -706,3 +721,5 @@ export const HUD: React.FC<HUDProps> = ({
     </div>
   );
 };
+
+export const HUD = React.memo(HUDComponent);

@@ -29,9 +29,19 @@ export class GameEngine {
   private fpsTimer: number = 0;
   private telemetryTimer: number = 0;
   private statsTimer: number = 0;
-  private respawnEffectTimer: number = 0;
+  private lastRespawnFadeAlpha: number = 0;
   private activeKeys: Set<string> = new Set();
   private isPointerLocked: boolean = false;
+
+  private static readonly CAMPFIRE_POS: THREE.Vector3 = new THREE.Vector3(8.0, 4.6, -18.0);
+  private static readonly TIME_LABELS: Record<string, string> = {
+    day: 'SOLAR CYCLE: MIDDAY',
+    sunset: 'SOLAR CYCLE: AMBER TWILIGHT',
+    night: 'SOLAR CYCLE: CELESTIAL NIGHT',
+    red_moon: 'PHENOMENON: RED MOON ECLIPSE',
+  };
+  private _observerPos: THREE.Vector3 = new THREE.Vector3();
+  private _tempVec: THREE.Vector3 = new THREE.Vector3();
 
   public onPerformanceUpdate?: (stats: PerformanceStats) => void;
   public onRespawnEffect?: (alpha: number) => void;
@@ -115,32 +125,46 @@ export class GameEngine {
       if (this.onStatsUpdate) this.onStatsUpdate(this.player.getPlayerStats());
     };
 
-    // Second-person observer hook: finds closest observing NPC or creature within 22m
+    // Second-person observer hook: finds closest observing NPC or creature within 22m (zero allocation)
     this.player.getNearbyObserver = () => {
       const pPos = this.player.position;
       let closest: { position: THREE.Vector3; name: string } | null = null;
-      let minDist = 22.0;
+      let minDistSq = 22.0 * 22.0;
 
-      for (const npc of this.world.npcs) {
-        const nPos = npc.mesh ? npc.mesh.position : new THREE.Vector3(...npc.position);
-        const d = pPos.distanceTo(nPos);
-        if (d < minDist && d > 1.2) {
-          minDist = d;
+      for (let i = 0; i < this.world.npcs.length; i++) {
+        const npc = this.world.npcs[i];
+        const nx = npc.mesh ? npc.mesh.position.x : npc.position[0];
+        const ny = npc.mesh ? npc.mesh.position.y : npc.position[1];
+        const nz = npc.mesh ? npc.mesh.position.z : npc.position[2];
+        const dx = pPos.x - nx;
+        const dy = pPos.y - ny;
+        const dz = pPos.z - nz;
+        const dSq = dx * dx + dy * dy + dz * dz;
+        if (dSq < minDistSq && dSq > 1.44) {
+          minDistSq = dSq;
+          this._observerPos.set(nx, ny + 1.7, nz);
           closest = {
-            position: nPos.clone().add(new THREE.Vector3(0, 1.7, 0)),
+            position: this._observerPos,
             name: `${npc.name} (${npc.role})`,
           };
         }
       }
 
-      for (const w of this.world.wildlife) {
-        const wPos = w.mesh ? w.mesh.position : new THREE.Vector3(...w.position);
-        const d = pPos.distanceTo(wPos);
-        if (d < minDist && d > 1.5) {
-          minDist = d;
+      for (let i = 0; i < this.world.wildlife.length; i++) {
+        const w = this.world.wildlife[i];
+        const wx = w.mesh ? w.mesh.position.x : w.position[0];
+        const wy = w.mesh ? w.mesh.position.y : w.position[1];
+        const wz = w.mesh ? w.mesh.position.z : w.position[2];
+        const dx = pPos.x - wx;
+        const dy = pPos.y - wy;
+        const dz = pPos.z - wz;
+        const dSq = dx * dx + dy * dy + dz * dz;
+        if (dSq < minDistSq && dSq > 2.25) {
+          minDistSq = dSq;
           const eyeH = w.species === 'cloudgrazer' ? 2.8 : 1.3;
+          this._observerPos.set(wx, wy + eyeH, wz);
           closest = {
-            position: wPos.clone().add(new THREE.Vector3(0, eyeH, 0)),
+            position: this._observerPos,
             name: `${w.name} (${w.species})`,
           };
         }
@@ -190,52 +214,52 @@ export class GameEngine {
       this.stats.triangles = this.renderer.info.render.triangles;
       this.frameCount = 0;
       this.fpsTimer = 0;
-      if (this.onPerformanceUpdate) this.onPerformanceUpdate(this.stats);
+      if (this.onPerformanceUpdate && this.settings.showFps) {
+        this.onPerformanceUpdate(this.stats);
+      }
     }
 
     if (!this.isPaused) {
       this.processDesktopMovement();
       this.player.update(delta);
 
-      // HUD data is not part of the render loop: publish it at a bounded rate.
+      // Throttle telemetry updates to ~10 Hz (100ms) to prevent 60 FPS React re-render thrashing
       this.telemetryTimer += delta;
-      if (this.onTelemetryUpdate && this.telemetryTimer >= 0.1) {
-        this.telemetryTimer %= 0.1;
-        const baseTelemetry = this.player.getTelemetry();
-        const timeLabels: Record<string, string> = {
-          day: 'SOLAR CYCLE: MIDDAY',
-          sunset: 'SOLAR CYCLE: AMBER TWILIGHT',
-          night: 'SOLAR CYCLE: CELESTIAL NIGHT',
-          red_moon: 'PHENOMENON: RED MOON ECLIPSE',
-        };
-        this.onTelemetryUpdate({
-          ...baseTelemetry,
-          timeOfDay: this.world.timeOfDay,
-          timeLabel: timeLabels[this.world.timeOfDay] || 'SOLAR CYCLE: NORMAL',
-        });
+      if (this.telemetryTimer >= 0.1) {
+        this.telemetryTimer = 0;
+        if (this.onTelemetryUpdate) {
+          const baseTelemetry = this.player.getTelemetry();
+          this.onTelemetryUpdate({
+            ...baseTelemetry,
+            timeOfDay: this.world.timeOfDay,
+            timeLabel: GameEngine.TIME_LABELS[this.world.timeOfDay] || 'SOLAR CYCLE: NORMAL',
+          });
+        }
       }
 
+      // Throttle stats updates to ~10 Hz (100ms)
       this.statsTimer += delta;
-      if (this.onStatsUpdate && this.statsTimer >= 0.2) {
-        this.statsTimer %= 0.2;
-        this.onStatsUpdate(this.player.getPlayerStats());
+      if (this.statsTimer >= 0.1) {
+        this.statsTimer = 0;
+        if (this.onStatsUpdate) {
+          this.onStatsUpdate(this.player.getPlayerStats());
+        }
       }
 
-      this.respawnEffectTimer += delta;
-      if (this.onRespawnEffect && this.respawnEffectTimer >= 1 / 30) {
-        this.respawnEffectTimer %= 1 / 30;
-        this.onRespawnEffect(this.player.respawnFadeAlpha);
+      // Only notify respawn alpha on actual state transition to avoid per-frame React updates
+      const currentRespawnAlpha = this.player.respawnFadeAlpha;
+      if (this.onRespawnEffect && (currentRespawnAlpha > 0.001 || this.lastRespawnFadeAlpha > 0.001)) {
+        if (Math.abs(currentRespawnAlpha - this.lastRespawnFadeAlpha) > 0.02 || (currentRespawnAlpha <= 0.001 && this.lastRespawnFadeAlpha > 0.001)) {
+          this.lastRespawnFadeAlpha = currentRespawnAlpha;
+          this.onRespawnEffect(currentRespawnAlpha <= 0.001 ? 0 : currentRespawnAlpha);
+        }
       }
 
       this.world.update(elapsedTime, delta, this.player.position);
 
-      // Campfire rest healing near Traveler Jorah's rest camp ([8.0, 4.6, -18.0]).
-      // Scalar distance math avoids allocating a temporary Vector3 every frame.
-      const campfireDx = this.player.position.x - 8.0;
-      const campfireDy = this.player.position.y - 4.6;
-      const campfireDz = this.player.position.z + 18.0;
-      const campfireDistSq = campfireDx * campfireDx + campfireDy * campfireDy + campfireDz * campfireDz;
-      if (campfireDistSq < 3.8 * 3.8 && !this.player.isRespawning) {
+      // Campfire rest healing near Traveler Jorah's rest camp ([8.0, 4.6, -18.0]) - zero-allocation check
+      const campfireDist = this.player.position.distanceTo(GameEngine.CAMPFIRE_POS);
+      if (campfireDist < 3.8 && !this.player.isRespawning) {
         if (this.player.health < this.player.maxHealth || this.player.stamina < this.player.maxStamina) {
           this.player.heal(delta * 5.0);
           this.player.restoreStamina(delta * 18.0);
@@ -380,7 +404,6 @@ export class GameEngine {
   public destroy() {
     this.isRunning = false;
     if (this.animFrameId !== null) cancelAnimationFrame(this.animFrameId);
-    this.activeKeys.clear();
     if (this.renderer) {
       this.renderer.dispose();
       this.renderer.forceContextLoss();

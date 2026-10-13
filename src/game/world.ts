@@ -41,6 +41,11 @@ export class WorldManager {
   // Flying speeders
   public speeders: THREE.Group[] = [];
 
+  // Performance optimization structures
+  public localLights: Array<{ light: THREE.PointLight; worldPos: THREE.Vector3; maxDistSq: number }> = [];
+  public cloudMounds: Array<{ mesh: THREE.Mesh; origY: number; index: number }> = [];
+  private lightCullTimer: number = 0;
+
   // Day & Night Cycle + Red Moon
   public timeOfDay: TimeOfDay = 'day';
   public dayCycleTime: number = 0; // 0 to 120 seconds cycle
@@ -143,6 +148,7 @@ export class WorldManager {
     this.buildNPCs();
     this.buildHarvestableResources();
     this.buildWorldCheckpoints();
+    this.initPerformanceOptimizations();
   }
 
   private setupLighting() {
@@ -269,11 +275,7 @@ export class WorldManager {
       cloudGroup.add(mound);
 
       const origY = mound.position.y;
-      this.animatables.push({
-        update: (time) => {
-          mound.position.y = origY + Math.sin(time * 0.4 + i) * 1.5;
-        }
-      });
+      this.cloudMounds.push({ mesh: mound, origY, index: i });
     }
 
     this.scene.add(cloudGroup);
@@ -1918,15 +1920,7 @@ export class WorldManager {
 
       this.scene.add(group);
 
-      this.animatables.push({
-        update: (time) => {
-          itemMesh.rotation.y = time * 1.5;
-          itemMesh.rotation.x = Math.sin(time) * 0.3;
-          itemMesh.position.y = 0.2 + Math.sin(time * 2.5) * 0.12;
-        }
-      });
-
-      this.resources.push({
+      const resItem: HarvestableResource = {
         id,
         name,
         itemType,
@@ -1935,6 +1929,16 @@ export class WorldManager {
         position: pos,
         collected: false,
         mesh: group,
+      };
+      this.resources.push(resItem);
+
+      this.animatables.push({
+        update: (time) => {
+          if (resItem.collected) return;
+          itemMesh.rotation.y = time * 1.5;
+          itemMesh.rotation.x = Math.sin(time) * 0.3;
+          itemMesh.position.y = 0.2 + Math.sin(time * 2.5) * 0.12;
+        }
       });
     };
 
@@ -2205,24 +2209,110 @@ export class WorldManager {
     });
   }
 
+  public initPerformanceOptimizations() {
+    this.localLights = [];
+    this.scene.updateMatrixWorld(true);
+
+    this.scene.traverse((obj) => {
+      if (obj instanceof THREE.PointLight) {
+        // Exclude redMoonLight (global eclipse sky phenomenon with 280m radius)
+        if (obj !== this.redMoonLight) {
+          const worldPos = new THREE.Vector3();
+          obj.getWorldPosition(worldPos);
+          const baseDist = obj.distance > 0 ? obj.distance : 14;
+          const maxDist = baseDist + 12;
+          this.localLights.push({
+            light: obj,
+            worldPos,
+            maxDistSq: maxDist * maxDist,
+          });
+        }
+      }
+    });
+
+    // Freeze static groups and meshes so Three.js skips updating their matrices every frame
+    const dynamicKeywords = ['speeder', 'ray', 'wisp', 'prism', 'crystal', 'item', 'torch', 'flame', 'needle', 'humanoid', 'torso', 'leg', 'arm', 'head', 'gasgiant', 'ring', 'dome'];
+    this.scene.traverse((obj) => {
+      if (obj instanceof THREE.Mesh) {
+        let isDynamic = false;
+        let curr: THREE.Object3D | null = obj;
+        while (curr && curr !== this.scene) {
+          const name = (curr.name || '').toLowerCase();
+          for (let k = 0; k < dynamicKeywords.length; k++) {
+            if (name.includes(dynamicKeywords[k])) {
+              isDynamic = true;
+              break;
+            }
+          }
+          if (isDynamic) break;
+          curr = curr.parent;
+        }
+
+        if (!isDynamic) {
+          obj.matrixAutoUpdate = false;
+          obj.updateMatrix();
+        }
+      }
+    });
+  }
+
   public update(time: number, delta: number, playerPos?: THREE.Vector3) {
-    for (let i = 0; i < this.animatables.length; i++) {
+    // 1. Consolidated golden cloud sea animation (tight loop, zero closures)
+    const numClouds = this.cloudMounds.length;
+    for (let i = 0; i < numClouds; i++) {
+      const c = this.cloudMounds[i];
+      c.mesh.position.y = c.origY + Math.sin(time * 0.4 + c.index) * 1.5;
+    }
+
+    // 2. Animatables
+    const animCount = this.animatables.length;
+    for (let i = 0; i < animCount; i++) {
       this.animatables[i].update(time, delta);
     }
 
-    // NPC smooth facing reaction to player proximity (< 6.5m)
+    // 3. Dynamic PointLight distance culling (reduces GPU fragment shader light loops from 35+ to 2-4)
     if (playerPos) {
-      for (const npc of this.npcs) {
+      this.lightCullTimer += delta;
+      if (this.lightCullTimer >= 0.05) { // 20 Hz throttle
+        this.lightCullTimer = 0;
+        const px = playerPos.x;
+        const py = playerPos.y;
+        const pz = playerPos.z;
+        const numLights = this.localLights.length;
+        for (let i = 0; i < numLights; i++) {
+          const entry = this.localLights[i];
+          const wp = entry.worldPos;
+          const dx = px - wp.x;
+          const dy = py - wp.y;
+          const dz = pz - wp.z;
+          const distSq = dx * dx + dy * dy + dz * dz;
+          entry.light.visible = distSq <= entry.maxDistSq;
+        }
+      }
+    }
+
+    // 4. NPC smooth facing reaction to player proximity using squared distance (zero Math.sqrt)
+    if (playerPos) {
+      const px = playerPos.x;
+      const pz = playerPos.z;
+      const npcs = this.npcs;
+      const numNpcs = npcs.length;
+      for (let i = 0; i < numNpcs; i++) {
+        const npc = npcs[i];
         if (!npc.mesh || npc.behavior === 'patrolling') continue;
-        const dist = npc.mesh.position.distanceTo(playerPos);
-        if (dist < 6.5) {
-          const targetAngle = Math.atan2(playerPos.x - npc.mesh.position.x, playerPos.z - npc.mesh.position.z);
+        const nx = npc.mesh.position.x;
+        const nz = npc.mesh.position.z;
+        const dx = px - nx;
+        const dz = pz - nz;
+        const distSq = dx * dx + dz * dz;
+        if (distSq < 42.25) { // 6.5m * 6.5m
+          const targetAngle = Math.atan2(dx, dz);
           npc.mesh.rotation.y = THREE.MathUtils.lerp(npc.mesh.rotation.y, targetAngle, Math.min(1.0, 4.0 * delta));
         }
       }
     }
 
-    // Progressive Day-Night Cycle (120 seconds for full loop, unless locked)
+    // 5. Progressive Day-Night Cycle (120 seconds for full loop, unless locked)
     this.dayCycleTime += delta;
     if (this.dayCycleTime > 120) {
       this.dayCycleTime = 0;
@@ -2241,7 +2331,13 @@ export class WorldManager {
     }
   }
 
-  public setQuality(_quality: 'low' | 'balanced' | 'high') {
-    // Quality adjustments
+  public setQuality(quality: 'low' | 'balanced' | 'high') {
+    const margin = quality === 'low' ? 6 : quality === 'balanced' ? 10 : 16;
+    for (let i = 0; i < this.localLights.length; i++) {
+      const entry = this.localLights[i];
+      const baseDist = entry.light.distance > 0 ? entry.light.distance : 14;
+      const maxDist = baseDist + margin;
+      entry.maxDistSq = maxDist * maxDist;
+    }
   }
 }

@@ -60,30 +60,23 @@ export class InteractionManager {
     const py = this.player.position.y;
     const pz = this.player.position.z;
 
-    let closestTarget: InteractableObject | null = null;
-    let minDistanceSq = this.interactionRange * this.interactionRange;
+    const minDistanceSq = this.interactionRange * this.interactionRange;
+    let bestType: 'checkpoint' | 'npc' | 'resource' | 'anchor' | 'fragment' | 'inscription' | null = null;
+    let bestIndex = -1;
+    let bestDistSq = minDistanceSq;
 
     // 1. Checkpoints
     const checkpoints = this.world.checkpoints;
     for (let i = 0; i < checkpoints.length; i++) {
-      const cp = checkpoints[i];
-      const pos = cp.position;
+      const pos = checkpoints[i].position;
       const dx = px - pos[0];
       const dy = py - pos[1];
       const dz = pz - pos[2];
       const distSq = dx * dx + dy * dy + dz * dz;
-      if (distSq < minDistanceSq) {
-        minDistanceSq = distSq;
-        const dist = Math.sqrt(distSq);
-        closestTarget = {
-          id: cp.id,
-          type: 'checkpoint',
-          title: cp.name,
-          prompt: cp.activated ? 'Checkpoint Active' : `Activate ${cp.name}`,
-          distance: dist,
-          position: new THREE.Vector3(pos[0], pos[1], pos[2]),
-          onInteract: () => this.handleCheckpointInteract(cp.id),
-        };
+      if (distSq < bestDistSq) {
+        bestDistSq = distSq;
+        bestType = 'checkpoint';
+        bestIndex = i;
       }
     }
 
@@ -98,18 +91,10 @@ export class InteractionManager {
       const dy = py - ny;
       const dz = pz - nz;
       const distSq = dx * dx + dy * dy + dz * dz;
-      if (distSq < minDistanceSq) {
-        minDistanceSq = distSq;
-        const dist = Math.sqrt(distSq);
-        closestTarget = {
-          id: npc.id,
-          type: 'npc',
-          title: npc.name,
-          prompt: `Speak with ${npc.name} (${npc.role})`,
-          distance: dist,
-          position: new THREE.Vector3(nx, ny, nz),
-          onInteract: () => this.handleNpcInteract(npc.id),
-        };
+      if (distSq < bestDistSq) {
+        bestDistSq = distSq;
+        bestType = 'npc';
+        bestIndex = i;
       }
     }
 
@@ -123,18 +108,10 @@ export class InteractionManager {
       const dy = py - pos[1];
       const dz = pz - pos[2];
       const distSq = dx * dx + dy * dy + dz * dz;
-      if (distSq < minDistanceSq) {
-        minDistanceSq = distSq;
-        const dist = Math.sqrt(distSq);
-        closestTarget = {
-          id: res.id,
-          type: 'resource',
-          title: res.name,
-          prompt: `Harvest ${res.name} (+${res.coinValue}c)`,
-          distance: dist,
-          position: new THREE.Vector3(pos[0], pos[1], pos[2]),
-          onInteract: () => this.handleResourceInteract(res.id),
-        };
+      if (distSq < bestDistSq) {
+        bestDistSq = distSq;
+        bestType = 'resource';
+        bestIndex = i;
       }
     }
 
@@ -147,18 +124,10 @@ export class InteractionManager {
       const dy = py - pos[1];
       const dz = pz - pos[2];
       const distSq = dx * dx + dy * dy + dz * dz;
-      if (distSq < minDistanceSq) {
-        minDistanceSq = distSq;
-        const dist = Math.sqrt(distSq);
-        closestTarget = {
-          id: anchor.id,
-          type: 'anchor',
-          title: anchor.name,
-          prompt: anchor.activated ? 'Anchor Harmonized' : 'Attune Ancient Anchor',
-          distance: dist,
-          position: new THREE.Vector3(pos[0], pos[1], pos[2]),
-          onInteract: () => this.handleAnchorInteract(anchor.id),
-        };
+      if (distSq < bestDistSq) {
+        bestDistSq = distSq;
+        bestType = 'anchor';
+        bestIndex = i;
       }
     }
 
@@ -172,18 +141,10 @@ export class InteractionManager {
       const dy = py - pos[1];
       const dz = pz - pos[2];
       const distSq = dx * dx + dy * dy + dz * dz;
-      if (distSq < minDistanceSq) {
-        minDistanceSq = distSq;
-        const dist = Math.sqrt(distSq);
-        closestTarget = {
-          id: frag.id,
-          type: 'fragment',
-          title: frag.name,
-          prompt: 'Absorb World Fragment',
-          distance: dist,
-          position: new THREE.Vector3(pos[0], pos[1], pos[2]),
-          onInteract: () => this.handleFragmentInteract(frag.id),
-        };
+      if (distSq < bestDistSq) {
+        bestDistSq = distSq;
+        bestType = 'fragment';
+        bestIndex = i;
       }
     }
 
@@ -196,35 +157,128 @@ export class InteractionManager {
       const dy = py - pos[1];
       const dz = pz - pos[2];
       const distSq = dx * dx + dy * dy + dz * dz;
-      if (distSq < minDistanceSq) {
-        minDistanceSq = distSq;
-        const dist = Math.sqrt(distSq);
-        closestTarget = {
-          id: insc.id,
-          type: 'inscription',
-          title: insc.title,
-          prompt: 'Read Ancient Inscription',
-          distance: dist,
-          position: new THREE.Vector3(pos[0], pos[1], pos[2]),
-          onInteract: () => this.handleInscriptionInteract(insc.id),
-        };
+      if (distSq < bestDistSq) {
+        bestDistSq = distSq;
+        bestType = 'inscription';
+        bestIndex = i;
       }
     }
 
-    // If close enough and player auto-picks fragment or presses interact
-    const currentTargetId = this.currentTarget ? this.currentTarget.id : null;
-    const currentTargetPrompt = this.currentTarget ? this.currentTarget.prompt : null;
-    const nextTargetId = closestTarget ? (closestTarget as InteractableObject).id : null;
-    const nextTargetPrompt = closestTarget ? (closestTarget as InteractableObject).prompt : null;
+    if (bestType === null) {
+      if (this.currentTarget !== null) {
+        this.currentTarget = null;
+        this.emitState();
+      }
+      return;
+    }
 
-    const targetChanged =
-      nextTargetId !== currentTargetId ||
-      nextTargetPrompt !== currentTargetPrompt;
+    const dist = Math.sqrt(bestDistSq);
 
-    // Keep the freshest target/action without re-rendering the React HUD every frame.
-    this.currentTarget = closestTarget;
-    if (targetChanged) {
-      this.emitState();
+    if (bestType === 'checkpoint') {
+      const cp = checkpoints[bestIndex];
+      const nextPrompt = cp.activated ? 'Checkpoint Active' : `Activate ${cp.name}`;
+      if (!this.currentTarget || this.currentTarget.id !== cp.id || this.currentTarget.prompt !== nextPrompt) {
+        this.currentTarget = {
+          id: cp.id,
+          type: 'checkpoint',
+          title: cp.name,
+          prompt: nextPrompt,
+          distance: dist,
+          position: new THREE.Vector3(cp.position[0], cp.position[1], cp.position[2]),
+          onInteract: () => this.handleCheckpointInteract(cp.id),
+        };
+        this.emitState();
+      } else {
+        this.currentTarget.distance = dist;
+      }
+    } else if (bestType === 'npc') {
+      const npc = npcs[bestIndex];
+      const nextPrompt = `Speak with ${npc.name} (${npc.role})`;
+      if (!this.currentTarget || this.currentTarget.id !== npc.id || this.currentTarget.prompt !== nextPrompt) {
+        const nx = npc.mesh ? npc.mesh.position.x : npc.position[0];
+        const ny = npc.mesh ? npc.mesh.position.y : npc.position[1];
+        const nz = npc.mesh ? npc.mesh.position.z : npc.position[2];
+        this.currentTarget = {
+          id: npc.id,
+          type: 'npc',
+          title: npc.name,
+          prompt: nextPrompt,
+          distance: dist,
+          position: new THREE.Vector3(nx, ny, nz),
+          onInteract: () => this.handleNpcInteract(npc.id),
+        };
+        this.emitState();
+      } else {
+        this.currentTarget.distance = dist;
+      }
+    } else if (bestType === 'resource') {
+      const res = resources[bestIndex];
+      const nextPrompt = `Harvest ${res.name} (+${res.coinValue}c)`;
+      if (!this.currentTarget || this.currentTarget.id !== res.id || this.currentTarget.prompt !== nextPrompt) {
+        this.currentTarget = {
+          id: res.id,
+          type: 'resource',
+          title: res.name,
+          prompt: nextPrompt,
+          distance: dist,
+          position: new THREE.Vector3(res.position[0], res.position[1], res.position[2]),
+          onInteract: () => this.handleResourceInteract(res.id),
+        };
+        this.emitState();
+      } else {
+        this.currentTarget.distance = dist;
+      }
+    } else if (bestType === 'anchor') {
+      const a = anchors[bestIndex];
+      const nextPrompt = a.activated ? 'Anchor Harmonized' : 'Attune Ancient Anchor';
+      if (!this.currentTarget || this.currentTarget.id !== a.id || this.currentTarget.prompt !== nextPrompt) {
+        this.currentTarget = {
+          id: a.id,
+          type: 'anchor',
+          title: a.name,
+          prompt: nextPrompt,
+          distance: dist,
+          position: new THREE.Vector3(a.position[0], a.position[1], a.position[2]),
+          onInteract: () => this.handleAnchorInteract(a.id),
+        };
+        this.emitState();
+      } else {
+        this.currentTarget.distance = dist;
+      }
+    } else if (bestType === 'fragment') {
+      const f = fragments[bestIndex];
+      const nextPrompt = 'Absorb World Fragment';
+      if (!this.currentTarget || this.currentTarget.id !== f.id || this.currentTarget.prompt !== nextPrompt) {
+        this.currentTarget = {
+          id: f.id,
+          type: 'fragment',
+          title: f.name,
+          prompt: nextPrompt,
+          distance: dist,
+          position: new THREE.Vector3(f.position[0], f.position[1], f.position[2]),
+          onInteract: () => this.handleFragmentInteract(f.id),
+        };
+        this.emitState();
+      } else {
+        this.currentTarget.distance = dist;
+      }
+    } else if (bestType === 'inscription') {
+      const ins = inscriptions[bestIndex];
+      const nextPrompt = 'Read Ancient Inscription';
+      if (!this.currentTarget || this.currentTarget.id !== ins.id || this.currentTarget.prompt !== nextPrompt) {
+        this.currentTarget = {
+          id: ins.id,
+          type: 'inscription',
+          title: ins.title,
+          prompt: nextPrompt,
+          distance: dist,
+          position: new THREE.Vector3(ins.position[0], ins.position[1], ins.position[2]),
+          onInteract: () => this.handleInscriptionInteract(ins.id),
+        };
+        this.emitState();
+      } else {
+        this.currentTarget.distance = dist;
+      }
     }
   }
 

@@ -314,6 +314,12 @@ export default function App() {
     }
   }, []);
 
+  const handleOpenJournal = useCallback(() => setShowJournal(true), []);
+  const handleOpenQuests = useCallback(() => setShowQuests(true), []);
+  const handleOpenInventory = useCallback(() => setShowInventory(true), []);
+  const handleOpenCrafting = useCallback(() => setShowCrafting(true), []);
+  const handleOpenMap = useCallback(() => setShowMap(true), []);
+
   useEffect(() => {
     if (!containerRef.current) return;
     const initialSettings = loadSettings();
@@ -332,10 +338,10 @@ export default function App() {
     setWorldCheckpoints([...engine.world.checkpoints]);
 
     engine.onToggleCamera = handleToggleCamera;
-    engine.onOpenInventory = () => setShowInventory(true);
-    engine.onOpenCrafting = () => setShowCrafting(true);
-    engine.onOpenQuests = () => setShowQuests(true);
-    engine.onOpenMap = () => setShowMap(true);
+    engine.onOpenInventory = handleOpenInventory;
+    engine.onOpenCrafting = handleOpenCrafting;
+    engine.onOpenQuests = handleOpenQuests;
+    engine.onOpenMap = handleOpenMap;
 
     engine.onStatsUpdate = (newStats) => {
       setPlayerStats(newStats);
@@ -796,11 +802,11 @@ export default function App() {
           telemetry={telemetry}
           showFps={settings.showFps}
           onPause={handlePause}
-          onOpenJournal={() => setShowJournal(true)}
-          onOpenQuests={() => setShowQuests(true)}
-          onOpenInventory={() => setShowInventory(true)}
-          onOpenCrafting={() => setShowCrafting(true)}
-          onOpenMap={() => setShowMap(true)}
+          onOpenJournal={handleOpenJournal}
+          onOpenQuests={handleOpenQuests}
+          onOpenInventory={handleOpenInventory}
+          onOpenCrafting={handleOpenCrafting}
+          onOpenMap={handleOpenMap}
           onCloseInscription={handleCloseInscription}
           onInteract={handleTriggerInteract}
           onToggleCamera={handleToggleCamera}

@@ -86,6 +86,8 @@ export class PlayerController {
   private _lookTarget: THREE.Vector3 = new THREE.Vector3();
   private _camTarget: THREE.Vector3 = new THREE.Vector3();
   private _desiredCameraPos: THREE.Vector3 = new THREE.Vector3();
+  private _raycastHits: THREE.Intersection[] = [];
+  private _cachedLookDir: THREE.Vector3 = new THREE.Vector3();
 
   // Respawn
   public isRespawning: boolean = false;
@@ -115,7 +117,7 @@ export class PlayerController {
 
     this.raycaster = new THREE.Raycaster();
     this.raycaster.far = 4.0;
-    this.raycaster.firstHitOnly = true;
+    (this.raycaster as any).firstHitOnly = true;
 
     this.buildCharacterModel();
     this.updateCamera(0.016);
@@ -395,9 +397,10 @@ export class PlayerController {
     this._rayOrigin.set(probePos.x, probePos.y + 1.2, probePos.z);
     this.raycaster.set(this._rayOrigin, this._rayDir);
 
-    const hits = this.raycaster.intersectObjects(this.walkableMeshes, false);
-    if (hits.length > 0) {
-      const topHit = hits[0].point.y;
+    this._raycastHits.length = 0;
+    this.raycaster.intersectObjects(this.walkableMeshes, false, this._raycastHits);
+    if (this._raycastHits.length > 0) {
+      const topHit = this._raycastHits[0].point.y;
       return Math.max(topHit, 4.2);
     }
 
@@ -621,8 +624,7 @@ export class PlayerController {
   }
 
   public getLookDirection(): THREE.Vector3 {
-    const dir = new THREE.Vector3();
-    this.camera.getWorldDirection(dir);
-    return dir;
+    this.camera.getWorldDirection(this._cachedLookDir);
+    return this._cachedLookDir;
   }
 }
