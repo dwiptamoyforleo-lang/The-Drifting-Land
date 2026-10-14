@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { PlayerController } from './player';
 import { WorldManager } from './world';
 import { ThreadManager } from './threads';
-import { InteractionManager, InteractionState } from './interactions';
+import { InteractionManager } from './interactions';
 import { GameSettings, PerformanceStats, TelemetryData, PlayerStats } from './types';
 import { soundSystem } from './audio';
 
@@ -33,7 +33,6 @@ export class GameEngine {
   private activeKeys: Set<string> = new Set();
   private isPointerLocked: boolean = false;
   private cleanupListeners: (() => void)[] = [];
-
   private static readonly CAMPFIRE_POS: THREE.Vector3 = new THREE.Vector3(8.0, 4.6, -18.0);
   private static readonly TIME_LABELS: Record<string, string> = {
     day: 'SOLAR CYCLE: MIDDAY',
@@ -42,7 +41,6 @@ export class GameEngine {
     red_moon: 'PHENOMENON: RED MOON ECLIPSE',
   };
   private _observerPos: THREE.Vector3 = new THREE.Vector3();
-  private _tempVec: THREE.Vector3 = new THREE.Vector3();
 
   public onPerformanceUpdate?: (stats: PerformanceStats) => void;
   public onRespawnEffect?: (alpha: number) => void;
@@ -81,19 +79,16 @@ export class GameEngine {
         precision: this.settings.graphicsQuality === 'low' ? 'mediump' : 'highp',
         stencil: false,
       });
-    } catch (primaryErr) {
-      console.warn('Primary WebGL initialization failed:', primaryErr);
+    } catch {
       rendererInstance = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'default', precision: 'mediump', stencil: false });
     }
     this.renderer = rendererInstance;
     this.applyQualitySettings(this.settings.graphicsQuality);
-
     const width = Math.max(this.container.clientWidth || window.innerWidth || 800, 320);
     const height = Math.max(this.container.clientHeight || window.innerHeight || 600, 240);
     this.renderer.setSize(width, height);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
-
     this.container.innerHTML = '';
     this.container.appendChild(this.renderer.domElement);
     this.renderer.domElement.style.width = '100%';
@@ -113,7 +108,6 @@ export class GameEngine {
   private initGameSystems() {
     this.world = new WorldManager(this.scene);
     this.world.buildWorld();
-    this.world.initPerformanceOptimizations();
     this.world.setQuality(this.settings.graphicsQuality);
     this.scene.updateMatrixWorld(true);
 
@@ -128,12 +122,10 @@ export class GameEngine {
       if (this.onStatsUpdate) this.onStatsUpdate(this.player.getPlayerStats());
     };
 
-    // Second-person observer hook: finds closest observing NPC or creature within 22m (zero allocation)
     this.player.getNearbyObserver = () => {
       const pPos = this.player.position;
       let closest: { position: THREE.Vector3; name: string } | null = null;
       let minDistSq = 22.0 * 22.0;
-
       for (let i = 0; i < this.world.npcs.length; i++) {
         const npc = this.world.npcs[i];
         const nx = npc.mesh ? npc.mesh.position.x : npc.position[0];
@@ -146,33 +138,9 @@ export class GameEngine {
         if (dSq < minDistSq && dSq > 1.44) {
           minDistSq = dSq;
           this._observerPos.set(nx, ny + 1.7, nz);
-          closest = {
-            position: this._observerPos,
-            name: `${npc.name} (${npc.role})`,
-          };
+          closest = { position: this._observerPos, name: `${npc.name} (${npc.role})` };
         }
       }
-
-      for (let i = 0; i < this.world.wildlife.length; i++) {
-        const w = this.world.wildlife[i];
-        const wx = w.mesh ? w.mesh.position.x : w.position[0];
-        const wy = w.mesh ? w.mesh.position.y : w.position[1];
-        const wz = w.mesh ? w.mesh.position.z : w.position[2];
-        const dx = pPos.x - wx;
-        const dy = pPos.y - wy;
-        const dz = pPos.z - wz;
-        const dSq = dx * dx + dy * dy + dz * dz;
-        if (dSq < minDistSq && dSq > 2.25) {
-          minDistSq = dSq;
-          const eyeH = w.species === 'cloudgrazer' ? 2.8 : 1.3;
-          this._observerPos.set(wx, wy + eyeH, wz);
-          closest = {
-            position: this._observerPos,
-            name: `${w.name} (${w.species})`,
-          };
-        }
-      }
-
       return closest;
     };
 
@@ -205,7 +173,6 @@ export class GameEngine {
   private gameLoop = () => {
     if (!this.isRunning) return;
     this.animFrameId = requestAnimationFrame(this.gameLoop);
-
     const delta = Math.min(this.clock.getDelta(), 0.1);
     const elapsedTime = this.clock.getElapsedTime();
 
@@ -226,7 +193,6 @@ export class GameEngine {
       this.processDesktopMovement();
       this.player.update(delta);
 
-      // Throttle telemetry updates to ~10 Hz (100ms) to prevent 60 FPS React re-render thrashing
       this.telemetryTimer += delta;
       if (this.telemetryTimer >= 0.1) {
         this.telemetryTimer = 0;
@@ -240,7 +206,6 @@ export class GameEngine {
         }
       }
 
-      // Throttle stats updates to ~10 Hz (100ms)
       this.statsTimer += delta;
       if (this.statsTimer >= 0.1) {
         this.statsTimer = 0;
@@ -249,7 +214,6 @@ export class GameEngine {
         }
       }
 
-      // Only notify respawn alpha on actual state transition to avoid per-frame React updates
       const currentRespawnAlpha = this.player.respawnFadeAlpha;
       if (this.onRespawnEffect && (currentRespawnAlpha > 0.001 || this.lastRespawnFadeAlpha > 0.001)) {
         if (Math.abs(currentRespawnAlpha - this.lastRespawnFadeAlpha) > 0.02 || (currentRespawnAlpha <= 0.001 && this.lastRespawnFadeAlpha > 0.001)) {
@@ -259,8 +223,6 @@ export class GameEngine {
       }
 
       this.world.update(elapsedTime, delta, this.player.position);
-
-      // Campfire rest healing near Traveler Jorah's rest camp ([8.0, 4.6, -18.0]) - zero-allocation check
       const campfireDist = this.player.position.distanceTo(GameEngine.CAMPFIRE_POS);
       if (campfireDist < 3.8 && !this.player.isRespawning) {
         if (this.player.health < this.player.maxHealth || this.player.stamina < this.player.maxStamina) {
@@ -279,23 +241,19 @@ export class GameEngine {
   private processDesktopMovement() {
     let forward = 0;
     let right = 0;
-
     if (this.activeKeys.has('KeyW') || this.activeKeys.has('ArrowUp')) forward += 1;
     if (this.activeKeys.has('KeyS') || this.activeKeys.has('ArrowDown')) forward -= 1;
     if (this.activeKeys.has('KeyD') || this.activeKeys.has('ArrowRight')) right += 1;
     if (this.activeKeys.has('KeyA') || this.activeKeys.has('ArrowLeft')) right -= 1;
-
     if (forward !== 0 || right !== 0) {
       this.player.input.moveForward = forward;
       this.player.input.moveRight = right;
     }
-
     this.player.input.sprint = this.activeKeys.has('ShiftLeft') || this.activeKeys.has('ShiftRight');
   }
 
   private setupDesktopInputs() {
     const canvas = this.renderer.domElement;
-
     const onCanvasClick = () => {
       if (!('ontouchstart' in window) && !this.isPointerLocked) {
         canvas.requestPointerLock();
@@ -322,64 +280,32 @@ export class GameEngine {
       this.activeKeys.add(e.code);
       if (e.code === 'Space') this.player.input.jump = true;
       if (e.code === 'KeyE') this.interactions.triggerCurrentInteract();
-      if (e.code === 'KeyF') {
-        this.player.input.primaryAction = true;
-        this.interactions.showToast('PRIMARY ACTION', 'Executed equipped tool action.');
-      }
-      if (e.code === 'KeyV') {
-        if (this.onToggleCamera) this.onToggleCamera();
-      }
-      if (e.code === 'KeyI' || e.code === 'Tab') {
+      if (e.code === 'KeyV' && this.onToggleCamera) this.onToggleCamera();
+      if ((e.code === 'KeyI' || e.code === 'Tab') && this.onOpenInventory) {
         e.preventDefault();
-        if (this.onOpenInventory) this.onOpenInventory();
+        this.onOpenInventory();
       }
-      if (e.code === 'KeyJ') {
-        if (this.onOpenQuests) this.onOpenQuests();
-      }
-      if (e.code === 'KeyM') {
-        if (this.onOpenMap) this.onOpenMap();
-      }
-      if (e.code === 'KeyC') {
-        if (this.onOpenCrafting) this.onOpenCrafting();
-      }
+      if (e.code === 'KeyJ' && this.onOpenQuests) this.onOpenQuests();
+      if (e.code === 'KeyM' && this.onOpenMap) this.onOpenMap();
+      if (e.code === 'KeyC' && this.onOpenCrafting) this.onOpenCrafting();
       if (e.code === 'Digit1') this.onHotbarUse?.(0);
       if (e.code === 'Digit2') this.onHotbarUse?.(1);
       if (e.code === 'Digit3') this.onHotbarUse?.(2);
       if (e.code === 'Digit4') this.onHotbarUse?.(3);
       if (e.code === 'Digit5') this.onHotbarUse?.(4);
       if (e.code === 'Digit6') this.onHotbarUse?.(5);
-      if (e.code === 'Escape') {
-        this.isPaused = !this.isPaused;
-      }
+      if (e.code === 'Escape') this.isPaused = !this.isPaused;
     };
     window.addEventListener('keydown', onKeyDown);
     this.cleanupListeners.push(() => window.removeEventListener('keydown', onKeyDown));
 
     const onKeyUp = (e: KeyboardEvent) => {
       this.activeKeys.delete(e.code);
-      if (e.code === 'KeyW' || e.code === 'KeyS' || e.code === 'ArrowUp' || e.code === 'ArrowDown') {
-        this.player.input.moveForward = 0;
-      }
-      if (e.code === 'KeyA' || e.code === 'KeyD' || e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
-        this.player.input.moveRight = 0;
-      }
+      if (['KeyW', 'KeyS', 'ArrowUp', 'ArrowDown'].includes(e.code)) this.player.input.moveForward = 0;
+      if (['KeyA', 'KeyD', 'ArrowLeft', 'ArrowRight'].includes(e.code)) this.player.input.moveRight = 0;
     };
     window.addEventListener('keyup', onKeyUp);
     this.cleanupListeners.push(() => window.removeEventListener('keyup', onKeyUp));
-
-    const onMouseDown = (e: MouseEvent) => {
-      if (e.button === 0) {
-        this.interactions.showToast('TOOL ACTION', 'Used equipped item.');
-      } else if (e.button === 2) {
-        this.interactions.showToast('ALTERNATE ACTION', 'Secondary tool mode engaged.');
-      }
-    };
-    canvas.addEventListener('mousedown', onMouseDown);
-    this.cleanupListeners.push(() => canvas.removeEventListener('mousedown', onMouseDown));
-
-    const onContextMenu = (e: MouseEvent) => e.preventDefault();
-    canvas.addEventListener('contextmenu', onContextMenu);
-    this.cleanupListeners.push(() => canvas.removeEventListener('contextmenu', onContextMenu));
   }
 
   private setupResizeListener() {
@@ -391,56 +317,16 @@ export class GameEngine {
       this.player.camera.updateProjectionMatrix();
       this.renderer.setSize(width, height);
     };
-
     window.addEventListener('resize', onResize);
     this.cleanupListeners.push(() => window.removeEventListener('resize', onResize));
-
-    const onOrientation = () => setTimeout(onResize, 200);
-    window.addEventListener('orientationchange', onOrientation);
-    this.cleanupListeners.push(() => window.removeEventListener('orientationchange', onOrientation));
-  }
-
-  public restoreProgress(activatedAnchorIds: string[], collectedFragmentIds: string[], resonanceDiscovered: boolean) {
-    activatedAnchorIds.forEach(id => {
-      const anchor = this.world.anchors.find(a => a.id === id);
-      if (anchor) {
-        anchor.activated = true;
-        if (anchor.crystalMesh) (anchor.crystalMesh.material as THREE.MeshStandardMaterial).emissiveIntensity = 2.4;
-        if (anchor.light) anchor.light.intensity = 4.0;
-      }
-    });
-
-    collectedFragmentIds.forEach(id => {
-      const frag = this.world.fragments.find(f => f.id === id);
-      if (frag) {
-        frag.collected = true;
-        if (frag.mesh) frag.mesh.visible = false;
-      }
-    });
-
-    this.threads.evaluateResonance(this.world.anchors);
-    if (resonanceDiscovered) this.world.revealResonanceCitadel();
   }
 
   public destroy() {
     this.isRunning = false;
-    if (this.animFrameId !== null) cancelAnimationFrame(this.animFrameId);
-    
-    // Clean up all registered window, document, and canvas listeners
-    this.cleanupListeners.forEach((cleanup) => {
-      try {
-        cleanup();
-      } catch {
-        // Ignored
-      }
-    });
-    this.cleanupListeners = [];
-
-    if (this.renderer) {
-      this.renderer.dispose();
-      this.renderer.forceContextLoss();
-      if (this.renderer.domElement.parentNode) this.renderer.domElement.parentNode.removeChild(this.renderer.domElement);
+    if (this.animFrameId) cancelAnimationFrame(this.animFrameId);
+    this.cleanupListeners.forEach((fn) => fn());
+    if (this.renderer && this.renderer.domElement) {
+      this.renderer.domElement.remove();
     }
   }
 }
-
