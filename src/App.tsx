@@ -1,207 +1,489 @@
+/**
+ * Fully Integrated Application Core for THE DRIFTING LAND
+ * Connects GameEngine, HUD, TitleScreen, Modals (Inventory, Crafting, Shop, Settings, Map, Dimensions, Journal, Credits, Dialogue),
+ * LocalStorage persistence with versioning, and performance telemetry.
+ */
 import React, { useEffect, useRef, useState } from 'react';
-import * as THREE from 'three';
-import { WeatherSystem, WeatherType } from './game/weather';
-import { RedMoonEventSystem, CrimsonWardenBoss } from './game/redMoonBoss';
-import { REGIONAL_BOSSES } from './game/bosses';
-import { DimensionManager, DIMENSIONS_DATABASE } from './game/dimensions';
+import { GameEngine } from './game/engine';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { HUD } from './components/HUD';
+import { TitleScreen } from './components/TitleScreen';
+import { SectorSelectModal } from './components/SectorSelectModal';
+import { InventoryModal } from './components/InventoryModal';
+import { CraftingModal } from './components/CraftingModal';
+import { ShopModal } from './components/ShopModal';
+import { SettingsModal } from './components/SettingsModal';
+import { MapModal } from './components/MapModal';
+import { DimensionsModal } from './components/DimensionsModal';
+import { JournalModal } from './components/JournalModal';
+import { CreditsModal } from './components/CreditsModal';
+import { DialogueModal } from './components/DialogueModal';
+import {
+  GameSettings,
+  UserProfile,
+  GameProgress,
+  InventoryItem,
+  EquipmentSlot,
+  CraftingRecipe,
+  PerformanceStats,
+  TelemetryData,
+  PlayerStats,
+} from './game/types';
+import { DEFAULT_MAP_LOCATIONS, MapLocation } from './game/mapSystem';
+import { DIMENSIONS_DATABASE } from './game/dimensions';
+import { ITEM_DATABASE } from './game/itemDatabase';
+import { soundSystem } from './game/audio';
+
+const STORAGE_KEY_SETTINGS = 'the_drifting_world_settings_v2';
+const STORAGE_KEY_PROGRESS = 'the_drifting_world_progress_v2';
+const STORAGE_KEY_PROFILE = 'the_drifting_world_profile_v2';
+const STORAGE_KEY_INVENTORY = 'the_drifting_world_inventory_v2';
+
+const DEFAULT_SETTINGS: GameSettings = {
+  graphicsQuality: 'balanced',
+  renderDistance: 500,
+  shadowsEnabled: true,
+  environmentalEffects: true,
+  cameraEffects: true,
+  uiScale: 1.0,
+  sensitivity: 1.0,
+  touchLookSensitivity: 1.0,
+  joystickSize: 'medium',
+  buttonOpacity: 0.85,
+  audioEnabled: true,
+  masterVolume: 0.8,
+  musicVolume: 0.7,
+  ambientVolume: 0.7,
+  sfxVolume: 0.8,
+  cameraMode: 'third_person',
+  hudVisible: true,
+  dayCycleSpeed: 1.0,
+  showFps: false,
+};
+
+const DEFAULT_PROFILE: UserProfile = {
+  username: 'Sky_Vanguard',
+  level: 1,
+  xp: 120,
+  coins: 250,
+  selectedSector: 1,
+  unlockedSectors: [1, 2],
+  unlockedDimensions: [1, 2],
+};
+
+const DEFAULT_PROGRESS: GameProgress = {
+  activatedAnchors: ['anchor-1'],
+  activatedCheckpoints: ['cp-1'],
+  collectedFragments: ['frag-1'],
+  completedQuests: [],
+  activeQuests: { 'quest-anchors': 1 },
+  coins: 250,
+  unlockedDimensions: [1, 2],
+  discoveredRegions: ['Aero-Haven Hub'],
+  resonanceDiscovered: false,
+  bossesDefeated: [],
+  lastPosition: [0, 4.2, 0],
+  currentSector: 1,
+  currentDimension: 1,
+  saveVersion: '2.0.0',
+  timestamp: Date.now(),
+};
+
+const INITIAL_INVENTORY: InventoryItem[] = [
+  { ...ITEM_DATABASE['tool-survey-multitool'], quantity: 1 },
+  { ...ITEM_DATABASE['food-field-medkit'], quantity: 3 },
+  { ...ITEM_DATABASE['mat-stone'], quantity: 12 },
+  { ...ITEM_DATABASE['mat-wood'], quantity: 8 },
+  { ...ITEM_DATABASE['mat-lumenvine'], quantity: 5 },
+];
 
 export function App() {
   const containerRef = useRef<HTMLDivElement>(null);
-  
-  // Systems State
-  const [currentWeather, setCurrentWeather] = useState<WeatherType>('clear');
-  const [isNight, setIsNight] = useState<boolean>(false);
-  const [redMoonActive, setRedMoonActive] = useState<boolean>(false);
-  const [currentDimension, setCurrentDimension] = useState<number>(1);
-  const [anchorsCount, setAnchorsCount] = useState<number>(0);
-  const [notification, setNotification] = useState<string>('Welcome to The Drifting World.');
+  const engineRef = useRef<GameEngine | null>(null);
 
-  // Game Logic Instances
-  const weatherSystemRef = useRef<WeatherSystem>(new WeatherSystem('balanced'));
-  const redMoonSystemRef = useRef<RedMoonEventSystem>(new RedMoonEventSystem());
-  const dimensionManagerRef = useRef<DimensionManager>(new DimensionManager());
-  const crimsonWardenRef = useRef<CrimsonWardenBoss>(new CrimsonWardenBoss());
+  // Persistent States
+  const [settings, setSettings] = useState<GameSettings>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_SETTINGS);
+      return saved ? { ...DEFAULT_SETTINGS, ...JSON.parse(saved) } : DEFAULT_SETTINGS;
+    } catch {
+      return DEFAULT_SETTINGS;
+    }
+  });
 
+  const [profile, setProfile] = useState<UserProfile>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_PROFILE);
+      return saved ? JSON.parse(saved) : DEFAULT_PROFILE;
+    } catch {
+      return DEFAULT_PROFILE;
+    }
+  });
+
+  const [progress, setProgress] = useState<GameProgress>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_PROGRESS);
+      return saved ? JSON.parse(saved) : DEFAULT_PROGRESS;
+    } catch {
+      return DEFAULT_PROGRESS;
+    }
+  });
+
+  const [inventory, setInventory] = useState<InventoryItem[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_INVENTORY);
+      return saved ? JSON.parse(saved) : INITIAL_INVENTORY;
+    } catch {
+      return INITIAL_INVENTORY;
+    }
+  });
+
+  // Gameplay UI States
+  const [isInGame, setIsInGame] = useState<boolean>(false);
+  const [activeModal, setActiveModal] = useState<string | null>(null);
+  const [hotbar, setHotbar] = useState<(string | null)[]>(['tool-survey-multitool', 'food-field-medkit', null, null, null, null]);
+  const [selectedHotbarSlot, setSelectedHotbarSlot] = useState<number>(0);
+  const [equipped, setEquipped] = useState<Record<EquipmentSlot, string | null>>({
+    tool: 'tool-survey-multitool',
+    protective: null,
+    exploration: null,
+    utility: null,
+    relic: null,
+    artifact: null,
+  });
+
+  // Telemetry & Stats State
+  const [telemetry, setTelemetry] = useState<TelemetryData>({
+    health: 100,
+    maxHealth: 100,
+    stamina: 100,
+    maxStamina: 100,
+    currency: 250,
+    dayNumber: 1,
+    worldTime: '12:00',
+    timeToSunset: '4h 00m',
+    currentLocation: 'Sector 01: Aero-Haven Observation Deck',
+    currentObjective: 'Harmonize the 3 Magical Anchors across the archipelago.',
+    timeOfDay: 'day',
+    timeLabel: 'SOLAR CYCLE: MIDDAY',
+  });
+
+  const [playerStats, setPlayerStats] = useState<PlayerStats>({
+    maxHealth: 100,
+    maxStamina: 100,
+    speedMultiplier: 1.0,
+    fallDamageReduction: 10,
+    staminaRegenRate: 24,
+  });
+
+  const [fpsStats, setFpsStats] = useState<PerformanceStats>({ fps: 60, drawCalls: 0, triangles: 0 });
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>('saved');
+  const [respawnAlpha, setRespawnAlpha] = useState<number>(0);
+
+  // Save Persistence
   useEffect(() => {
-    if (!containerRef.current) return;
+    try {
+      setSaveStatus('saving');
+      localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(settings));
+      localStorage.setItem(STORAGE_KEY_PROFILE, JSON.stringify(profile));
+      localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(progress));
+      localStorage.setItem(STORAGE_KEY_INVENTORY, JSON.stringify(inventory));
+      setTimeout(() => setSaveStatus('saved'), 400);
+    } catch {
+      setSaveStatus('unsaved');
+    }
+  }, [settings, profile, progress, inventory]);
 
-    // Three.js Basic Setup
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x111625);
+  // Initialize Game Engine when entering world
+  useEffect(() => {
+    if (!isInGame || !containerRef.current) return;
+    const engine = new GameEngine(containerRef.current, settings);
+    engineRef.current = engine;
 
-    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2000);
-    camera.position.set(0, 15, 30);
-
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    containerRef.current.appendChild(renderer.domElement);
-
-    // Lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-    scene.add(ambientLight);
-
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    dirLight.position.set(50, 100, 50);
-    scene.add(dirLight);
-
-    // Test Terrain / Platform
-    const geometry = new THREE.BoxGeometry(100, 2, 100);
-    const material = new THREE.MeshStandardMaterial({ color: 0x2b4c3f });
-    const platform = new THREE.Mesh(geometry, material);
-    platform.position.y = -1;
-    scene.add(platform);
-
-    let animationFrameId: number;
-    let clock = new THREE.Clock();
-
-    const animate = () => {
-      animationFrameId = requestAnimationFrame(animate);
-      const delta = clock.getDelta();
-
-      // Update Weather
-      weatherSystemRef.current.update(delta, camera.position.y);
-      setCurrentWeather(weatherSystemRef.current.state.current);
-
-      // Render Scene
-      renderer.render(scene, camera);
+    engine.onPerformanceUpdate = (stats) => setFpsStats(stats);
+    engine.onTelemetryUpdate = (data) => setTelemetry(data);
+    engine.onStatsUpdate = (stats) => setPlayerStats(stats);
+    engine.onRespawnEffect = (alpha) => setRespawnAlpha(alpha);
+    engine.onToggleCamera = () => {
+      const modes: EquipmentSlot[] = ['third_person' as unknown as EquipmentSlot, 'first_person' as unknown as EquipmentSlot, 'second_person' as unknown as EquipmentSlot];
+      // Cycle camera modes
+      const current = settings.cameraMode;
+      const next = current === 'third_person' ? 'first_person' : current === 'first_person' ? 'second_person' : 'third_person';
+      setSettings((s) => ({ ...s, cameraMode: next }));
+      engine.player.setCameraMode(next);
     };
 
-    animate();
-
-    const handleResize = () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
+    engine.onOpenInventory = () => setActiveModal('inventory');
+    engine.onOpenCrafting = () => setActiveModal('crafting');
+    engine.onOpenMap = () => setActiveModal('map');
+    engine.onHotbarUse = (idx) => {
+      setSelectedHotbarSlot(idx);
+      const itemId = hotbar[idx];
+      if (itemId) {
+        const item = inventory.find((i) => i.id === itemId);
+        if (item && item.healAmount) {
+          engine.player.heal(item.healAmount);
+          // Decrement item
+          setInventory((inv) =>
+            inv
+              .map((i) => (i.id === itemId ? { ...i, quantity: i.quantity - 1 } : i))
+              .filter((i) => i.quantity > 0)
+          );
+        }
+      }
     };
-    window.addEventListener('resize', handleResize);
 
     return () => {
-      window.removeEventListener('resize', handleResize);
-      cancelAnimationFrame(animationFrameId);
-      renderer.dispose();
-      if (containerRef.current) {
-        containerRef.current.innerHTML = '';
-      }
+      engine.destroy();
+      engineRef.current = null;
     };
-  }, []);
+  }, [isInGame]);
 
-  // Handlers for UI Controls
-  const toggleDayNight = () => {
-    const nextNightState = !isNight;
-    setIsNight(nextNightState);
+  const handleUpdateSettings = (newSettings: GameSettings) => {
+    setSettings(newSettings);
+    if (engineRef.current) {
+      engineRef.current.applyQualitySettings(newSettings.graphicsQuality);
+      engineRef.current.setSensitivity(newSettings.sensitivity);
+      engineRef.current.player.setCameraMode(newSettings.cameraMode);
+    }
+  };
 
-    if (nextNightState) {
-      const redMoonTriggered = redMoonSystemRef.current.checkNightTransition(true);
-      if (redMoonTriggered) {
-        setRedMoonActive(true);
-        setNotification('⚠️ The Red Moon rises! The Crimson Warden appears!');
+  const handleCraftRecipe = (recipe: CraftingRecipe) => {
+    // Deduct materials
+    setInventory((inv) => {
+      let updated = [...inv];
+      recipe.materials.forEach((mat) => {
+        const found = updated.find((i) => i.id === mat.itemId);
+        if (found) {
+          found.quantity -= mat.count;
+        }
+      });
+      updated = updated.filter((i) => i.quantity > 0);
+
+      // Add result
+      const existingResult = updated.find((i) => i.id === recipe.resultItem.id);
+      if (existingResult) {
+        existingResult.quantity += recipe.resultCount;
       } else {
-        setRedMoonActive(false);
-        setNotification('Night falls across the realm.');
+        updated.push({ ...recipe.resultItem, quantity: recipe.resultCount });
       }
-    } else {
-      redMoonSystemRef.current.checkNightTransition(false);
-      setRedMoonActive(false);
-      setNotification('A new dawn breaks.');
-    }
-  };
-
-  const handleForceRedMoon = () => {
-    redMoonSystemRef.current.forceTriggerRedMoon();
-    setRedMoonActive(true);
-    setNotification('⚡ Developer Override: Red Moon forced active!');
-  };
-
-  const handleSwitchDimension = (dimId: number) => {
-    const success = dimensionManagerRef.current.switchDimension(dimId, anchorsCount);
-    if (success) {
-      setCurrentDimension(dimId);
-      const dimInfo = DIMENSIONS_DATABASE.find((d) => d.id === dimId);
-      setNotification(`Shifted dimension to: ${dimInfo?.name}`);
-    } else {
-      setNotification(`Cannot access dimension. Requires more anchors.`);
-    }
+      return updated;
+    });
   };
 
   return (
-    <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden', fontFamily: 'sans-serif' }}>
-      <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+    <ErrorBoundary>
+      <div className="relative w-full h-full overflow-hidden bg-[#070b14] text-slate-100 select-none font-sans">
+        {/* 3D WebGL Canvas Container */}
+        <div ref={containerRef} className="absolute inset-0 w-full h-full" />
 
-      {/* Overlay UI Panel */}
-      <div style={{
-        position: 'absolute',
-        top: 20,
-        left: 20,
-        backgroundColor: 'rgba(0, 0, 0, 0.75)',
-        color: '#fff',
-        padding: '16px',
-        borderRadius: '8px',
-        maxWidth: '320px',
-        zIndex: 10
-      }}>
-        <h3 style={{ margin: '0 0 10px 0', color: redMoonActive ? '#ff4d4d' : '#4da6ff' }}>
-          {redMoonActive ? '🔴 RED MOON ACTIVE' : '🌍 World Telemetry'}
-        </h3>
-        <p style={{ margin: '4px 0' }}><strong>Dimension:</strong> {DIMENSIONS_DATABASE.find(d => d.id === currentDimension)?.name}</p>
-        <p style={{ margin: '4px 0' }}><strong>Weather:</strong> {currentWeather.toUpperCase()}</p>
-        <p style={{ margin: '4px 0' }}><strong>Time:</strong> {isNight ? 'Night' : 'Day'}</p>
-        <p style={{ margin: '4px 0' }}><strong>Anchors:</strong> {anchorsCount}</p>
+        {/* Respawn / Death Fade Overlay */}
+        {respawnAlpha > 0 && (
+          <div
+            className="absolute inset-0 bg-black pointer-events-none z-40 transition-opacity duration-300"
+            style={{ opacity: respawnAlpha }}
+          >
+            <div className="absolute inset-0 flex items-center justify-center font-['Cinzel'] text-2xl text-rose-400 tracking-widest">
+              RESPAWNING ACROSS THE DRIFT...
+            </div>
+          </div>
+        )}
 
-        <div style={{ marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          <button onClick={toggleDayNight} style={buttonStyle}>
-            Toggle {isNight ? 'Day' : 'Night'}
-          </button>
-          <button onClick={handleForceRedMoon} style={{ ...buttonStyle, backgroundColor: '#800' }}>
-            Force Red Moon
-          </button>
-        </div>
+        {/* Title Screen if not in game */}
+        {!isInGame && (
+          <TitleScreen
+            onStartGame={() => setIsInGame(true)}
+            onNewGame={() => {
+              setProgress(DEFAULT_PROGRESS);
+              setInventory(INITIAL_INVENTORY);
+              setIsInGame(true);
+            }}
+            onOpenSectorSelect={() => setActiveModal('sector_select')}
+            onOpenDimensions={() => setActiveModal('dimensions')}
+            onOpenQuests={() => setActiveModal('quests')}
+            onOpenInventory={() => setActiveModal('inventory')}
+            onOpenShop={() => setActiveModal('shop')}
+            onOpenSettings={() => setActiveModal('settings')}
+            onOpenJournal={() => setActiveModal('journal')}
+            onOpenCredits={() => setActiveModal('credits')}
+            onResetProgress={() => {
+              setProgress(DEFAULT_PROGRESS);
+              setInventory(INITIAL_INVENTORY);
+            }}
+            progress={progress}
+          />
+        )}
 
-        <h4 style={{ margin: '14px 0 6px 0' }}>Dimensions:</h4>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-          {DIMENSIONS_DATABASE.map((dim) => (
-            <button
-              key={dim.id}
-              onClick={() => handleSwitchDimension(dim.id)}
-              style={{
-                ...buttonStyle,
-                backgroundColor: currentDimension === dim.id ? '#2b6cb0' : '#2d3748',
-                textAlign: 'left'
-              }}
-            >
-              {dim.name} {dim.requiredAnchors > anchorsCount ? `(Locked: ${dim.requiredAnchors} Anchors)` : ''}
-            </button>
-          ))}
-        </div>
+        {/* Active HUD in-game */}
+        {isInGame && settings.hudVisible && (
+          <HUD
+            health={telemetry.health}
+            maxHealth={telemetry.maxHealth}
+            stamina={telemetry.stamina}
+            maxStamina={telemetry.maxStamina}
+            currency={profile.coins}
+            dayNumber={telemetry.dayNumber}
+            worldTime={telemetry.worldTime}
+            timeToSunset={telemetry.timeToSunset}
+            currentLocation={telemetry.currentLocation}
+            currentObjective={telemetry.currentObjective}
+            hotbarItems={hotbar.map((id) => (id ? inventory.find((i) => i.id === id) || null : null))}
+            selectedHotbarSlot={selectedHotbarSlot}
+            contextPrompt={null}
+            activeEvent={null}
+            saveStatus={saveStatus}
+            cameraMode={settings.cameraMode}
+            onOpenMenu={(menu) => {
+              if (menu === 'pause' || menu === 'settings') setActiveModal('settings');
+              else if (menu === 'inventory') setActiveModal('inventory');
+              else if (menu === 'crafting') setActiveModal('crafting');
+              else if (menu === 'shop') setActiveModal('shop');
+              else if (menu === 'map') setActiveModal('map');
+              else if (menu === 'quests') setActiveModal('quests');
+            }}
+            onSelectHotbarSlot={(slot) => {
+              setSelectedHotbarSlot(slot);
+              engineRef.current?.onHotbarUse?.(slot);
+            }}
+            onInteract={() => {}}
+          />
+        )}
+
+        {/* Modals */}
+        {activeModal === 'settings' && (
+          <SettingsModal
+            settings={settings}
+            onUpdateSettings={handleUpdateSettings}
+            onClose={() => setActiveModal(null)}
+            onResetProgress={() => setProgress(DEFAULT_PROGRESS)}
+            onReturnToTitle={() => {
+              setIsInGame(false);
+              setActiveModal(null);
+            }}
+          />
+        )}
+
+        {activeModal === 'inventory' && (
+          <InventoryModal
+            inventory={inventory}
+            userProfile={profile}
+            equipped={equipped}
+            playerStats={playerStats}
+            hotbar={hotbar}
+            onUseItem={(itemId) => {
+              const item = inventory.find((i) => i.id === itemId);
+              if (item && item.healAmount && engineRef.current) {
+                engineRef.current.player.heal(item.healAmount);
+                setInventory((inv) =>
+                  inv.map((i) => (i.id === itemId ? { ...i, quantity: i.quantity - 1 } : i)).filter((i) => i.quantity > 0)
+                );
+              }
+            }}
+            onEquipItem={(itemId, slot) => {
+              setEquipped((eq) => ({ ...eq, [slot]: itemId }));
+            }}
+            onUnequipItem={(slot) => {
+              setEquipped((eq) => ({ ...eq, [slot]: null }));
+            }}
+            onAssignHotbar={(itemId, slotIndex) => {
+              setHotbar((hb) => {
+                const next = [...hb];
+                next[slotIndex] = itemId;
+                return next;
+              });
+            }}
+            onDiscardItem={(itemId) => {
+              setInventory((inv) =>
+                inv.map((i) => (i.id === itemId ? { ...i, quantity: i.quantity - 1 } : i)).filter((i) => i.quantity > 0)
+              );
+            }}
+            onOpenCrafting={() => setActiveModal('crafting')}
+            onClose={() => setActiveModal(null)}
+          />
+        )}
+
+        {activeModal === 'crafting' && (
+          <CraftingModal
+            inventory={inventory}
+            onCraftRecipe={handleCraftRecipe}
+            onClose={() => setActiveModal(null)}
+          />
+        )}
+
+        {activeModal === 'shop' && (
+          <ShopModal
+            userProfile={profile}
+            inventory={inventory}
+            anchorCount={progress.activatedAnchors.length}
+            onBuyItem={(item, cost) => {
+              setProfile((p) => ({ ...p, coins: p.coins - cost }));
+              setInventory((inv) => {
+                const existing = inv.find((i) => i.id === item.id);
+                if (existing) {
+                  return inv.map((i) => (i.id === item.id ? { ...i, quantity: i.quantity + 1 } : i));
+                }
+                return [...inv, { ...item, quantity: 1 }];
+              });
+            }}
+            onSellItem={(itemId, qty, earnings) => {
+              setProfile((p) => ({ ...p, coins: p.coins + earnings }));
+              setInventory((inv) =>
+                inv.map((i) => (i.id === itemId ? { ...i, quantity: i.quantity - qty } : i)).filter((i) => i.quantity > 0)
+              );
+            }}
+            onClose={() => setActiveModal(null)}
+          />
+        )}
+
+        {activeModal === 'map' && (
+          <MapModal
+            locations={DEFAULT_MAP_LOCATIONS}
+            playerPosition={{ x: 0, z: 0 }}
+            onClose={() => setActiveModal(null)}
+            onSelectLocation={() => setActiveModal(null)}
+          />
+        )}
+
+        {activeModal === 'dimensions' && (
+          <DimensionsModal
+            unlockedDimensions={profile.unlockedDimensions}
+            currentDimension={progress.currentDimension}
+            onSelectDimension={(dimId) => {
+              setProgress((p) => ({ ...p, currentDimension: dimId }));
+              setActiveModal(null);
+            }}
+            onClose={() => setActiveModal(null)}
+          />
+        )}
+
+        {activeModal === 'journal' && (
+          <JournalModal
+            progress={progress}
+            anchors={[]}
+            fragments={[]}
+            onClose={() => setActiveModal(null)}
+          />
+        )}
+
+        {activeModal === 'credits' && (
+          <CreditsModal onClose={() => setActiveModal(null)} />
+        )}
+
+        {activeModal === 'sector_select' && (
+          <SectorSelectModal
+            userProfile={profile}
+            progress={progress}
+            onUpdateProfile={(updated) => setProfile(updated)}
+            onSelectSectorAndLaunch={(sectorId) => {
+              setProfile((p) => ({ ...p, selectedSector: sectorId }));
+              setIsInGame(true);
+              setActiveModal(null);
+            }}
+            onBackToTitle={() => setActiveModal(null)}
+          />
+        )}
       </div>
-
-      {/* Notification Banner */}
-      <div style={{
-        position: 'absolute',
-        bottom: 20,
-        left: '50%',
-        transform: 'translateX(-50%)',
-        backgroundColor: 'rgba(20, 20, 30, 0.85)',
-        color: '#e2e8f0',
-        padding: '10px 20px',
-        borderRadius: '4px',
-        border: '1px solid #4a5568',
-        zIndex: 10,
-        textAlign: 'center'
-      }}>
-        {notification}
-      </div>
-    </div>
+    </ErrorBoundary>
   );
 }
-
-const buttonStyle: React.CSSProperties = {
-  backgroundColor: '#4a5568',
-  color: 'white',
-  border: 'none',
-  padding: '6px 10px',
-  borderRadius: '4px',
-  cursor: 'pointer',
-  fontSize: '12px',
-};
-
 export default App;
