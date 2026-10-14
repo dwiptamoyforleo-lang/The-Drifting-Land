@@ -39,6 +39,8 @@ export class InteractionManager {
   private activeInscription: { title: string; text: string } | null = null;
   private activeDialogue: DialogueNode | null = null;
 
+  private proximityTimer: number = 0;
+
   constructor(world: WorldManager, threads: ThreadManager, player: PlayerController) {
     this.world = world;
     this.threads = threads;
@@ -54,6 +56,11 @@ export class InteractionManager {
         this.emitState();
       }
     }
+
+    // Throttle proximity scanning to 20 Hz (50ms) to prevent per-frame loop overhead
+    this.proximityTimer += delta;
+    if (this.proximityTimer < 0.05) return;
+    this.proximityTimer = 0;
 
     // Check distances to interactables using zero-allocation scalar math
     const px = this.player.position.x;

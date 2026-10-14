@@ -19,7 +19,7 @@ export interface GameSettings {
   buttonOpacity: number;     // 0.4 to 1.0
 }
 
-export type ItemRarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'relic';
+export type ItemRarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary' | 'mythic' | 'relic';
 
 export type ItemCategory =
   | 'resources'
@@ -153,12 +153,62 @@ export interface InscriptionLore {
 
 export interface InteractableObject {
   id: string;
-  type: 'anchor' | 'fragment' | 'inscription' | 'citadel_core' | 'npc' | 'resource' | 'checkpoint' | 'wildlife' | 'trader' | 'treasure';
+  type: 'anchor' | 'fragment' | 'inscription' | 'citadel_core' | 'npc' | 'resource' | 'checkpoint' | 'wildlife' | 'trader' | 'treasure' | 'plant' | 'creature' | 'vault_mechanism';
   title: string;
   prompt: string;
   distance: number;
   position: THREE.Vector3;
   onInteract: () => void;
+}
+
+export interface LootDrop {
+  itemId: string;
+  chance: number;       // 0.0 to 1.0 (e.g. 0.35 for 35%)
+  minQty: number;
+  maxQty: number;
+  rarity: ItemRarity;
+}
+
+export interface HostileCreature {
+  id: string;
+  name: string;
+  mobType: 'nest_scout' | 'ruin_guardian' | 'storm_ray_predator' | 'armored_golem' | 'rift_stalker' | 'ancient_titan_boss';
+  health: number;
+  maxHealth: number;
+  attackPower: number;
+  attackCooldown: number;
+  attackTimer: number;
+  detectionRange: number;
+  attackRange: number;
+  speed: number;
+  state: 'idle' | 'patrolling' | 'alerted' | 'chasing' | 'attacking' | 'defeated';
+  position: THREE.Vector3;
+  homePosition: THREE.Vector3;
+  mesh?: THREE.Group;
+  eyeLight?: THREE.PointLight;
+  lootTable: LootDrop[];
+  rareDropNotification?: string;
+  respawnTime?: number;
+  respawnTimer?: number;
+  isBoss?: boolean;
+}
+
+export interface CustomPlant {
+  id: string;
+  name: string;
+  species: 'lumenvine' | 'moonbloom' | 'emberfern' | 'driftroot' | 'glassleaf' | 'whispermoss' | 'rift_orchid';
+  habitat: string;
+  description: string;
+  position: [number, number, number];
+  harvestYieldItemId: string;
+  harvestYieldCount: number;
+  harvestRarity: ItemRarity;
+  harvestCooldown: number;
+  harvestTimer: number;
+  isHarvested: boolean;
+  requiresNight?: boolean;
+  mesh?: THREE.Object3D;
+  bloomLight?: THREE.PointLight;
 }
 
 export interface DialogueOption {
@@ -279,6 +329,19 @@ export interface GameProgress {
   studiedWildlife?: string[];
   discoveredSettlements?: string[];
   redMoonWitnessed: boolean;
+  discoveredCreatures?: string[];
+  defeatedBosses?: string[];
+  unlockedVaults?: string[];
+  catalogedPlants?: string[];
+}
+
+export interface WorldClockData {
+  dayNumber: number;
+  inGameTime: string; // e.g. "16:42"
+  period: 'Dawn' | 'Day' | 'Sunset' | 'Night' | 'Red Moon Eclipse';
+  nextTransitionLabel: string; // e.g. "Sunset in 02:18" or "Sunrise in 03:45"
+  weatherCondition: string; // e.g. "Solar Calm", "Celestial Mist", "Red Moon Distortion"
+  dayProgress: number; // 0.0 to 1.0
 }
 
 export interface TelemetryData {
@@ -287,6 +350,7 @@ export interface TelemetryData {
   elevationMeters: number;
   timeOfDay: TimeOfDay;
   timeLabel: string;
+  clock?: WorldClockData;
 }
 
 export interface UserProfile {

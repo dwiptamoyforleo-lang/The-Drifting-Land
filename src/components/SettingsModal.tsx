@@ -196,6 +196,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           </div>
 
+          {/* Performance & Diagnostics */}
+          <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
+            <div>
+              <span className="text-xs uppercase tracking-wider text-slate-400 font-semibold block">
+                Live FPS & Diagnostics
+              </span>
+              <span className="text-[10px] text-slate-500">
+                Display realtime FPS, draw calls, and triangle stats
+              </span>
+            </div>
+            <button
+              onClick={() => onUpdateSettings({ ...settings, showFps: !settings.showFps })}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer border transition-colors ${
+                settings.showFps
+                  ? 'bg-cyan-950/70 border-cyan-400 text-cyan-200 shadow-[0_0_10px_rgba(6,182,212,0.3)]'
+                  : 'bg-slate-900 border-slate-800 text-slate-400'
+              }`}
+            >
+              {settings.showFps ? 'ON' : 'OFF'}
+            </button>
+          </div>
+
           {/* Audio Controls */}
           <div className="space-y-3 pt-1 border-t border-slate-800/80">
             <div className="flex items-center justify-between">

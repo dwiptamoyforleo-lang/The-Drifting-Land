@@ -128,10 +128,10 @@ export default function App() {
 
       if (engineRef.current) {
         if (item.healAmount) {
-          engineRef.current.player.heal(item.healAmount);
+          engineRef.current.player.heal(item.healAmount, true);
         }
         if (item.staminaAmount) {
-          engineRef.current.player.restoreStamina(item.staminaAmount);
+          engineRef.current.player.restoreStamina(item.staminaAmount, true);
         }
         engineRef.current.interactions.showToast(
           'ITEM CONSUMED',
@@ -640,26 +640,26 @@ export default function App() {
     }
   };
 
-  const handlePause = () => {
+  const handlePause = useCallback(() => {
     setIsPaused(true);
     setShowSettings(true);
     if (engineRef.current) engineRef.current.pause();
-  };
+  }, []);
 
-  const handleResume = () => {
+  const handleResume = useCallback(() => {
     setIsPaused(false);
     setShowSettings(false);
     if (engineRef.current) engineRef.current.resume();
-  };
+  }, []);
 
-  const handleReturnToTitle = () => {
+  const handleReturnToTitle = useCallback(() => {
     setIsPaused(false);
     setShowSettings(false);
     setGameStarted(false);
     setShowSectorSelect(false);
-  };
+  }, []);
 
-  const handleUpdateSettings = (newSettings: GameSettings) => {
+  const handleUpdateSettings = useCallback((newSettings: GameSettings) => {
     setSettings(newSettings);
     saveSettings(newSettings);
     if (engineRef.current) {
@@ -667,7 +667,7 @@ export default function App() {
       engineRef.current.setSensitivity(newSettings.sensitivity);
       if (newSettings.cameraMode) engineRef.current.player.setCameraMode(newSettings.cameraMode);
     }
-  };
+  }, []);
 
   const handleUpdateProfile = (updatedProfile: UserProfile) => {
     setUserProfile(updatedProfile);

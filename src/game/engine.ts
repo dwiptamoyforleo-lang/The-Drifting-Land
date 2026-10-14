@@ -32,6 +32,7 @@ export class GameEngine {
   private lastRespawnFadeAlpha: number = 0;
   private activeKeys: Set<string> = new Set();
   private isPointerLocked: boolean = false;
+  private cleanupListeners: (() => void)[] = [];
 
   private static readonly CAMPFIRE_POS: THREE.Vector3 = new THREE.Vector3(8.0, 4.6, -18.0);
   private static readonly TIME_LABELS: Record<string, string> = {
@@ -112,6 +113,8 @@ export class GameEngine {
   private initGameSystems() {
     this.world = new WorldManager(this.scene);
     this.world.buildWorld();
+    this.world.initPerformanceOptimizations();
+    this.world.setQuality(this.settings.graphicsQuality);
     this.scene.updateMatrixWorld(true);
 
     this.player = new PlayerController(this.scene, [0, 4.2, 0]);
@@ -261,8 +264,8 @@ export class GameEngine {
       const campfireDist = this.player.position.distanceTo(GameEngine.CAMPFIRE_POS);
       if (campfireDist < 3.8 && !this.player.isRespawning) {
         if (this.player.health < this.player.maxHealth || this.player.stamina < this.player.maxStamina) {
-          this.player.heal(delta * 5.0);
-          this.player.restoreStamina(delta * 18.0);
+          this.player.heal(delta * 5.0, false);
+          this.player.restoreStamina(delta * 18.0, false);
         }
       }
 
@@ -293,23 +296,29 @@ export class GameEngine {
   private setupDesktopInputs() {
     const canvas = this.renderer.domElement;
 
-    canvas.addEventListener('click', () => {
+    const onCanvasClick = () => {
       if (!('ontouchstart' in window) && !this.isPointerLocked) {
         canvas.requestPointerLock();
       }
-    });
+    };
+    canvas.addEventListener('click', onCanvasClick);
+    this.cleanupListeners.push(() => canvas.removeEventListener('click', onCanvasClick));
 
-    document.addEventListener('pointerlockchange', () => {
+    const onPointerLockChange = () => {
       this.isPointerLocked = document.pointerLockElement === canvas;
-    });
+    };
+    document.addEventListener('pointerlockchange', onPointerLockChange);
+    this.cleanupListeners.push(() => document.removeEventListener('pointerlockchange', onPointerLockChange));
 
-    document.addEventListener('mousemove', (e) => {
+    const onMouseMove = (e: MouseEvent) => {
       if (this.isPointerLocked && !this.isPaused) {
         this.player.applyLookDelta(e.movementX, e.movementY, false);
       }
-    });
+    };
+    document.addEventListener('mousemove', onMouseMove);
+    this.cleanupListeners.push(() => document.removeEventListener('mousemove', onMouseMove));
 
-    window.addEventListener('keydown', (e) => {
+    const onKeyDown = (e: KeyboardEvent) => {
       this.activeKeys.add(e.code);
       if (e.code === 'Space') this.player.input.jump = true;
       if (e.code === 'KeyE') this.interactions.triggerCurrentInteract();
@@ -342,9 +351,11 @@ export class GameEngine {
       if (e.code === 'Escape') {
         this.isPaused = !this.isPaused;
       }
-    });
+    };
+    window.addEventListener('keydown', onKeyDown);
+    this.cleanupListeners.push(() => window.removeEventListener('keydown', onKeyDown));
 
-    window.addEventListener('keyup', (e) => {
+    const onKeyUp = (e: KeyboardEvent) => {
       this.activeKeys.delete(e.code);
       if (e.code === 'KeyW' || e.code === 'KeyS' || e.code === 'ArrowUp' || e.code === 'ArrowDown') {
         this.player.input.moveForward = 0;
@@ -352,17 +363,23 @@ export class GameEngine {
       if (e.code === 'KeyA' || e.code === 'KeyD' || e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
         this.player.input.moveRight = 0;
       }
-    });
+    };
+    window.addEventListener('keyup', onKeyUp);
+    this.cleanupListeners.push(() => window.removeEventListener('keyup', onKeyUp));
 
-    canvas.addEventListener('mousedown', (e) => {
+    const onMouseDown = (e: MouseEvent) => {
       if (e.button === 0) {
         this.interactions.showToast('TOOL ACTION', 'Used equipped item.');
       } else if (e.button === 2) {
         this.interactions.showToast('ALTERNATE ACTION', 'Secondary tool mode engaged.');
       }
-    });
+    };
+    canvas.addEventListener('mousedown', onMouseDown);
+    this.cleanupListeners.push(() => canvas.removeEventListener('mousedown', onMouseDown));
 
-    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    const onContextMenu = (e: MouseEvent) => e.preventDefault();
+    canvas.addEventListener('contextmenu', onContextMenu);
+    this.cleanupListeners.push(() => canvas.removeEventListener('contextmenu', onContextMenu));
   }
 
   private setupResizeListener() {
@@ -376,7 +393,11 @@ export class GameEngine {
     };
 
     window.addEventListener('resize', onResize);
-    window.addEventListener('orientationchange', () => setTimeout(onResize, 200));
+    this.cleanupListeners.push(() => window.removeEventListener('resize', onResize));
+
+    const onOrientation = () => setTimeout(onResize, 200);
+    window.addEventListener('orientationchange', onOrientation);
+    this.cleanupListeners.push(() => window.removeEventListener('orientationchange', onOrientation));
   }
 
   public restoreProgress(activatedAnchorIds: string[], collectedFragmentIds: string[], resonanceDiscovered: boolean) {
@@ -404,6 +425,17 @@ export class GameEngine {
   public destroy() {
     this.isRunning = false;
     if (this.animFrameId !== null) cancelAnimationFrame(this.animFrameId);
+    
+    // Clean up all registered window, document, and canvas listeners
+    this.cleanupListeners.forEach((cleanup) => {
+      try {
+        cleanup();
+      } catch {
+        // Ignored
+      }
+    });
+    this.cleanupListeners = [];
+
     if (this.renderer) {
       this.renderer.dispose();
       this.renderer.forceContextLoss();

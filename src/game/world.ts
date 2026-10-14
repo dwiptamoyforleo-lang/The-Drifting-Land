@@ -21,12 +21,20 @@ import {
   WorldCheckpoint,
   WorldWildlife,
   TreasureCache,
+  WorldClockData,
 } from './types';
+import { PlantManager } from './plants';
+import { CreatureManager } from './creatures';
+import { soundSystem } from './audio';
 
 export class WorldManager {
   public scene: THREE.Scene;
   public walkableMeshes: THREE.Object3D[] = [];
   public animatables: Array<{ update: (time: number, delta: number) => void }> = [];
+
+  // Specialized managers for flora and fauna
+  public plantsManager!: PlantManager;
+  public creaturesManager!: CreatureManager;
 
   // Interactive structures
   public anchors: MagicalAnchor[] = [];
@@ -38,6 +46,11 @@ export class WorldManager {
   public wildlife: WorldWildlife[] = [];
   public treasures: TreasureCache[] = [];
 
+  // Discoverable Vault Door mechanisms
+  public vaultDoorL?: THREE.Mesh;
+  public vaultDoorR?: THREE.Mesh;
+  public isVaultUnlocked: boolean = false;
+
   // Flying speeders
   public speeders: THREE.Group[] = [];
 
@@ -46,10 +59,20 @@ export class WorldManager {
   public cloudMounds: Array<{ mesh: THREE.Mesh; origY: number; index: number }> = [];
   private lightCullTimer: number = 0;
 
-  // Day & Night Cycle + Red Moon
+  // Day & Night Cycle + Live World Clock + Red Moon
   public timeOfDay: TimeOfDay = 'day';
-  public dayCycleTime: number = 0; // 0 to 120 seconds cycle
+  public dayNumber: number = 1;
+  public dayCycleTime: number = 240; // Starts in morning (~08:00)
+  public dayCycleDuration: number = 720; // 12 real minutes per full in-game 24h day
   public redMoonActive: boolean = false;
+  public clockData: WorldClockData = {
+    dayNumber: 1,
+    inGameTime: '08:00',
+    period: 'Day',
+    nextTransitionLabel: 'Sunset in 06:00',
+    weatherCondition: 'Solar Calm: Optimal Visibility',
+    dayProgress: 0.33,
+  };
   private ambientLight!: THREE.AmbientLight;
   private sunsetLight!: THREE.DirectionalLight;
   private planetLight!: THREE.DirectionalLight;
@@ -148,6 +171,9 @@ export class WorldManager {
     this.buildNPCs();
     this.buildHarvestableResources();
     this.buildWorldCheckpoints();
+    this.buildDiscoverableStructures();
+    this.plantsManager = new PlantManager(this.scene);
+    this.creaturesManager = new CreatureManager(this.scene);
     this.initPerformanceOptimizations();
   }
 
@@ -2209,6 +2235,474 @@ export class WorldManager {
     });
   }
 
+  /**
+   * 15. Discoverable Structures, Ruins, Camps & Vaults
+   * Adds Ancient Watchtower, Expedition Research Camp, Ancient Vault with sliding stone doors,
+   * Suspended Sky-Bridges with wind turbine, Unstable Dimensional Gateway, and Hidden Shrine.
+   */
+  private buildDiscoverableStructures() {
+    this.buildAncientWatchtower();
+    this.buildExpeditionCamp();
+    this.buildAncientVault();
+    this.buildSuspendedSkyBridgesAndTurbine();
+    this.buildDimensionalGateway();
+    this.buildHiddenShrine();
+  }
+
+  private buildAncientWatchtower() {
+    const towerGroup = new THREE.Group();
+    towerGroup.position.set(-28, 4.2, -12);
+
+    // Stepped octagonal foundation
+    const baseGeo = new THREE.CylinderGeometry(4.5, 5.0, 1.2, 8);
+    const base = new THREE.Mesh(baseGeo, this.matSteelDark);
+    base.position.y = 0.6;
+    towerGroup.add(base);
+    this.walkableMeshes.push(base);
+
+    // Tower column
+    const colGeo = new THREE.CylinderGeometry(2.8, 3.6, 9.5, 8);
+    const col = new THREE.Mesh(colGeo, this.matSteelPanel);
+    col.position.y = 5.35;
+    towerGroup.add(col);
+
+    // Spiral ascending walkway / steps hugging the tower up to y = 10.5
+    for (let s = 0; s < 8; s++) {
+      const stepGeo = new THREE.BoxGeometry(1.6, 0.35, 1.4);
+      const step = new THREE.Mesh(stepGeo, this.matSteelGrate);
+      const angle = (s * Math.PI) / 4;
+      const radius = 3.6;
+      step.position.set(Math.cos(angle) * radius, 1.2 + s * 1.15, Math.sin(angle) * radius);
+      step.rotation.y = -angle;
+      towerGroup.add(step);
+      this.walkableMeshes.push(step);
+    }
+
+    // High observation platform
+    const platformGeo = new THREE.CylinderGeometry(4.2, 4.2, 0.45, 8);
+    const platform = new THREE.Mesh(platformGeo, this.matSteelDark);
+    platform.position.y = 10.5;
+    towerGroup.add(platform);
+    this.walkableMeshes.push(platform);
+
+    // Beacon brazier on platform
+    const brazierGeo = new THREE.CylinderGeometry(0.6, 0.4, 0.8, 8);
+    const brazier = new THREE.Mesh(brazierGeo, this.matBrassPipes);
+    brazier.position.set(0, 11.1, 0);
+    towerGroup.add(brazier);
+
+    // Beacon flame core
+    const flameGeo = new THREE.OctahedronGeometry(0.35, 0);
+    const flame = new THREE.Mesh(flameGeo, this.matNeonCyan);
+    flame.position.set(0, 11.7, 0);
+    towerGroup.add(flame);
+
+    const beaconLight = new THREE.PointLight(0x06b6d4, 2.0, 16);
+    beaconLight.position.set(0, 11.8, 0);
+    towerGroup.add(beaconLight);
+
+    this.scene.add(towerGroup);
+
+    this.animatables.push({
+      update: (time) => {
+        flame.rotation.y = time * 2.2;
+        flame.position.y = 11.7 + Math.sin(time * 3.5) * 0.08;
+      },
+    });
+
+    // Inscription at tower apex
+    this.inscriptions.push({
+      id: 'insc-watchtower',
+      title: 'Chronicle of the Cloud Wardens',
+      text: 'We lit the high beacons when the Great Drift began, watching the continents fragment like celestial embers into the golden cloud sea.',
+      position: [-28, 11.0, -12],
+    });
+
+    // Sky Chest on top of the watchtower
+    this.treasures.push({
+      id: 'cache-watchtower',
+      name: 'Warden Sky-Vault Chest',
+      position: [-26.5, 11.0, -12],
+      coins: 180,
+      rewardItemId: 'mat-titanium',
+      opened: false,
+    });
+  }
+
+  private buildExpeditionCamp() {
+    const campGroup = new THREE.Group();
+    campGroup.position.set(16, 4.2, 12);
+
+    // Ground gravel base
+    const baseGeo = new THREE.CylinderGeometry(5.5, 6.0, 0.25, 12);
+    const base = new THREE.Mesh(baseGeo, this.matSteelGrate);
+    base.position.y = 0.125;
+    campGroup.add(base);
+    this.walkableMeshes.push(base);
+
+    // Two expedition canvas tents
+    for (let t = 0; t < 2; t++) {
+      const tentGeo = new THREE.ConeGeometry(2.2, 1.9, 4);
+      tentGeo.rotateY(Math.PI / 4);
+      const tent = new THREE.Mesh(tentGeo, this.matSteelPanel);
+      tent.position.set(-2.2 + t * 4.4, 1.0, -1.2);
+      campGroup.add(tent);
+    }
+
+    // Wooden & titanium supply crates
+    for (let c = 0; c < 3; c++) {
+      const crateGeo = new THREE.BoxGeometry(0.9, 0.9, 0.9);
+      const crate = new THREE.Mesh(crateGeo, this.matSteelDark);
+      crate.position.set(0.5 + c * 1.1, 0.45, 1.8);
+      campGroup.add(crate);
+      this.walkableMeshes.push(crate);
+    }
+
+    // Communications dish antenna
+    const mastGeo = new THREE.CylinderGeometry(0.06, 0.1, 4.5, 6);
+    const mast = new THREE.Mesh(mastGeo, this.matBrassPipes);
+    mast.position.set(-3.5, 2.25, 2.0);
+    campGroup.add(mast);
+
+    const dishGeo = new THREE.ConeGeometry(0.8, 0.35, 8);
+    dishGeo.rotateX(-Math.PI / 3);
+    const dish = new THREE.Mesh(dishGeo, this.matNeonAmber);
+    dish.position.set(-3.5, 4.3, 2.0);
+    campGroup.add(dish);
+
+    this.scene.add(campGroup);
+
+    // Discovery lore
+    this.inscriptions.push({
+      id: 'insc-camp-log',
+      title: 'Expedition Survey Log: Cycle 412',
+      text: 'Day 18: Atmospheric pressure stabilizes around Sector 01. The flora is producing bioluminescent fibers with remarkable electrical conductivity.',
+      position: [16, 4.6, 12],
+    });
+  }
+
+  private buildAncientVault() {
+    const vaultGroup = new THREE.Group();
+    vaultGroup.position.set(0, 4.2, -50);
+
+    // Monolithic basalt portal archway
+    const pillarL = new THREE.Mesh(new THREE.BoxGeometry(1.6, 5.5, 2.2), this.matSteelDark);
+    pillarL.position.set(-2.8, 2.75, 0);
+    const pillarR = pillarL.clone();
+    pillarR.position.x = 2.8;
+    vaultGroup.add(pillarL, pillarR);
+
+    const lintel = new THREE.Mesh(new THREE.BoxGeometry(7.2, 1.4, 2.4), this.matSteelDark);
+    lintel.position.set(0, 5.8, 0);
+    vaultGroup.add(lintel);
+
+    // Sliding heavy stone vault doors
+    const doorGeo = new THREE.BoxGeometry(2.1, 4.4, 0.5);
+    this.vaultDoorL = new THREE.Mesh(doorGeo, this.matSteelPanel);
+    this.vaultDoorL.name = 'vaultDoorL';
+    this.vaultDoorL.position.set(-1.05, 2.4, 0);
+    vaultGroup.add(this.vaultDoorL);
+
+    this.vaultDoorR = new THREE.Mesh(doorGeo, this.matSteelPanel);
+    this.vaultDoorR.name = 'vaultDoorR';
+    this.vaultDoorR.position.set(1.05, 2.4, 0);
+    vaultGroup.add(this.vaultDoorR);
+
+    // Locking Terminal Pedestal in front of the door
+    const pedestalGeo = new THREE.CylinderGeometry(0.35, 0.5, 1.1, 8);
+    const pedestal = new THREE.Mesh(pedestalGeo, this.matSteelDark);
+    pedestal.position.set(0, 0.55, 3.2);
+    vaultGroup.add(pedestal);
+
+    const glyphGeo = new THREE.BoxGeometry(0.5, 0.15, 0.4);
+    const glyph = new THREE.Mesh(glyphGeo, this.matNeonCyan);
+    glyph.position.set(0, 1.15, 3.2);
+    vaultGroup.add(glyph);
+
+    // Interior Chamber floor & walls behind doors
+    const chamberFloorGeo = new THREE.BoxGeometry(8.5, 0.4, 15.0);
+    const chamberFloor = new THREE.Mesh(chamberFloorGeo, this.matSteelDark);
+    chamberFloor.position.set(0, 0.2, -7.5);
+    vaultGroup.add(chamberFloor);
+    this.walkableMeshes.push(chamberFloor);
+
+    // Interior Crystal Sconces
+    const sconeGeo = new THREE.OctahedronGeometry(0.35, 0);
+    const scone1 = new THREE.Mesh(sconeGeo, this.matNeonCyan);
+    scone1.position.set(-3.5, 2.8, -6.0);
+    const scone2 = scone1.clone();
+    scone2.position.set(3.5, 2.8, -6.0);
+    vaultGroup.add(scone1, scone2);
+
+    this.scene.add(vaultGroup);
+
+    // Treasures inside the vault!
+    this.treasures.push({
+      id: 'cache-vault-relic',
+      name: 'Pre-Drift Reliquary Ark',
+      position: [0, 4.8, -58.0],
+      coins: 350,
+      rewardItemId: 'relic-heart-archipelago',
+      opened: false,
+    });
+    this.treasures.push({
+      id: 'cache-vault-blueprints',
+      name: 'Ancient Schematics Lockbox',
+      position: [2.8, 4.8, -55.0],
+      coins: 200,
+      rewardItemId: 'tool-plasma-cutter',
+      opened: false,
+    });
+  }
+
+  public unlockVault(): boolean {
+    if (this.isVaultUnlocked) return false;
+    this.isVaultUnlocked = true;
+    soundSystem.playVaultDoor();
+
+    if (this.vaultDoorL && this.vaultDoorR) {
+      const origLX = this.vaultDoorL.position.x;
+      const origRX = this.vaultDoorR.position.x;
+      let progress = 0;
+      this.animatables.push({
+        update: (_, dt) => {
+          if (progress < 1.0) {
+            progress += dt * 0.75;
+            const cur = Math.min(1.0, progress);
+            this.vaultDoorL!.position.x = THREE.MathUtils.lerp(origLX, origLX - 2.0, cur);
+            this.vaultDoorR!.position.x = THREE.MathUtils.lerp(origRX, origRX + 2.0, cur);
+          }
+        },
+      });
+    }
+    return true;
+  }
+
+  private buildSuspendedSkyBridgesAndTurbine() {
+    // High sky-bridge connecting Sector 01 to Sector 02 at y = 8.5
+    const bridgeGroup = new THREE.Group();
+    bridgeGroup.position.set(24.0, 8.5, -25.0);
+
+    // Main walkway
+    const deckGeo = new THREE.BoxGeometry(4.5, 0.45, 22.0);
+    const deck = new THREE.Mesh(deckGeo, this.matSteelGrate);
+    bridgeGroup.add(deck);
+    this.walkableMeshes.push(deck);
+
+    // Railings
+    const railGeo = new THREE.BoxGeometry(0.15, 0.9, 22.0);
+    const railL = new THREE.Mesh(railGeo, this.matSteelDark);
+    railL.position.set(-2.1, 0.65, 0);
+    const railR = railL.clone();
+    railR.position.x = 2.1;
+    bridgeGroup.add(railL, railR);
+
+    // Aerodynamic Wind Turbine generator on adjacent pylon
+    const mastGeo = new THREE.CylinderGeometry(0.35, 0.6, 12.0, 8);
+    const mast = new THREE.Mesh(mastGeo, this.matSteelDark);
+    mast.position.set(6.0, 4.0, -4.0);
+    bridgeGroup.add(mast);
+
+    const hubGeo = new THREE.SphereGeometry(0.7, 8, 8);
+    const hub = new THREE.Mesh(hubGeo, this.matBrassPipes);
+    hub.position.set(6.0, 10.0, -4.0);
+    bridgeGroup.add(hub);
+
+    // 3 Aerodynamic Turbine Blades
+    const bladeGroup = new THREE.Group();
+    bladeGroup.name = 'turbineBlades';
+    bladeGroup.position.set(6.0, 10.0, -3.5);
+
+    for (let b = 0; b < 3; b++) {
+      const bladeGeo = new THREE.BoxGeometry(0.35, 4.2, 0.08);
+      const blade = new THREE.Mesh(bladeGeo, this.matNeonCyan);
+      const angle = (b * Math.PI * 2) / 3;
+      blade.position.set(Math.sin(angle) * 2.1, Math.cos(angle) * 2.1, 0);
+      blade.rotation.z = -angle;
+      bladeGroup.add(blade);
+    }
+    bridgeGroup.add(bladeGroup);
+
+    this.scene.add(bridgeGroup);
+
+    this.animatables.push({
+      update: (time) => {
+        bladeGroup.rotation.z = time * 2.8;
+      },
+    });
+  }
+
+  private buildDimensionalGateway() {
+    const portalGroup = new THREE.Group();
+    portalGroup.position.set(32.0, 8.0, -42.0);
+
+    // Raised stone platform
+    const platGeo = new THREE.CylinderGeometry(4.2, 4.8, 0.5, 10);
+    const platform = new THREE.Mesh(platGeo, this.matSteelDark);
+    platform.position.y = 0.25;
+    portalGroup.add(platform);
+    this.walkableMeshes.push(platform);
+
+    // Obsidian Portal Ring
+    const ringGeo = new THREE.TorusGeometry(2.8, 0.35, 8, 24);
+    const ring = new THREE.Mesh(ringGeo, this.matSteelDark);
+    ring.position.y = 3.2;
+    portalGroup.add(ring);
+
+    // Swirling dimensional etheric vortex
+    const vortexGeo = new THREE.CircleGeometry(2.6, 24);
+    const vortexMat = new THREE.MeshBasicMaterial({
+      color: 0xa855f7,
+      transparent: true,
+      opacity: 0.65,
+      side: THREE.DoubleSide,
+    });
+    const vortex = new THREE.Mesh(vortexGeo, vortexMat);
+    vortex.name = 'portalVortex';
+    vortex.position.y = 3.2;
+    portalGroup.add(vortex);
+
+    const portalLight = new THREE.PointLight(0xa855f7, 2.5, 12);
+    portalLight.position.set(0, 3.2, 0.5);
+    portalGroup.add(portalLight);
+
+    this.scene.add(portalGroup);
+
+    this.animatables.push({
+      update: (time) => {
+        vortex.rotation.z = time * 1.5;
+        portalLight.intensity = 2.0 + Math.sin(time * 4.0) * 0.6;
+      },
+    });
+  }
+
+  private buildHiddenShrine() {
+    const shrineGroup = new THREE.Group();
+    shrineGroup.position.set(-18.0, 4.2, 16.0);
+
+    // Broken pillars creating a natural secluded nook
+    for (let p = 0; p < 3; p++) {
+      const colGeo = new THREE.CylinderGeometry(0.5, 0.65, 2.8 - p * 0.4, 6);
+      const col = new THREE.Mesh(colGeo, this.matSteelPanel);
+      const angle = (p * Math.PI * 2) / 3;
+      col.position.set(Math.cos(angle) * 1.8, 1.4, Math.sin(angle) * 1.8);
+      shrineGroup.add(col);
+    }
+
+    // Sacred stone altar
+    const altarGeo = new THREE.BoxGeometry(1.4, 0.8, 1.0);
+    const altar = new THREE.Mesh(altarGeo, this.matSteelDark);
+    altar.position.set(0, 0.4, 0);
+    shrineGroup.add(altar);
+    this.walkableMeshes.push(altar);
+
+    // Glowing relic orb on altar
+    const orb = new THREE.Mesh(new THREE.DodecahedronGeometry(0.22, 0), this.matNeonMagenta);
+    orb.position.set(0, 0.95, 0);
+    shrineGroup.add(orb);
+
+    this.scene.add(shrineGroup);
+
+    this.treasures.push({
+      id: 'cache-hidden-shrine',
+      name: 'Shrine of the Sky Spirits',
+      position: [-18.0, 4.5, 17.0],
+      coins: 250,
+      rewardItemId: 'mat-chrono-core',
+      opened: false,
+    });
+  }
+
+  /**
+   * 16. Live World Clock & Celestial Day-and-Night Progression
+   */
+  public updateClock(delta: number): WorldClockData {
+    this.dayCycleTime += delta;
+    if (this.dayCycleTime >= this.dayCycleDuration) {
+      this.dayCycleTime -= this.dayCycleDuration;
+      this.dayNumber++;
+    }
+
+    const dayProgress = this.dayCycleTime / this.dayCycleDuration;
+    const totalMinutesInDay = dayProgress * 1440; // 24 * 60
+    const inGameHours = Math.floor(totalMinutesInDay / 60);
+    const inGameMinutes = Math.floor(totalMinutesInDay % 60);
+    const timeString = `${inGameHours.toString().padStart(2, '0')}:${inGameMinutes.toString().padStart(2, '0')}`;
+
+    let period: 'Dawn' | 'Day' | 'Sunset' | 'Night' | 'Red Moon Eclipse' = 'Day';
+    let nextTransitionLabel = '';
+    let weatherCondition = 'Solar Calm: Optimal Visibility';
+
+    if (this.redMoonActive) {
+      period = 'Red Moon Eclipse';
+      nextTransitionLabel = 'Eclipse Ending Soon';
+      weatherCondition = 'Gravitational Distortion: Aurora Shearing';
+    } else if (inGameHours >= 7 && inGameHours < 18) {
+      period = 'Day';
+      const sunsetSec = (18 / 24) * this.dayCycleDuration;
+      const remSec = Math.max(0, Math.floor(sunsetSec - this.dayCycleTime));
+      const remMin = Math.floor(remSec / 60);
+      const remS = remSec % 60;
+      nextTransitionLabel = `Sunset in ${remMin.toString().padStart(2, '0')}:${remS.toString().padStart(2, '0')}`;
+      weatherCondition = 'Solar Calm: Warm Amber Currents';
+    } else if (inGameHours >= 18 && inGameHours < 21) {
+      period = 'Sunset';
+      const nightSec = (21 / 24) * this.dayCycleDuration;
+      const remSec = Math.max(0, Math.floor(nightSec - this.dayCycleTime));
+      const remMin = Math.floor(remSec / 60);
+      const remS = remSec % 60;
+      nextTransitionLabel = `Night in ${remMin.toString().padStart(2, '0')}:${remS.toString().padStart(2, '0')}`;
+      weatherCondition = 'Amber Twilight: High Strato-Breeze';
+    } else if (inGameHours >= 21 || inGameHours < 5) {
+      period = 'Night';
+      let sunriseSec = (5 / 24) * this.dayCycleDuration;
+      if (this.dayCycleTime > sunriseSec) sunriseSec += this.dayCycleDuration;
+      const remSec = Math.max(0, Math.floor(sunriseSec - this.dayCycleTime));
+      const remMin = Math.floor(remSec / 60);
+      const remS = remSec % 60;
+      nextTransitionLabel = `Sunrise in ${remMin.toString().padStart(2, '0')}:${remS.toString().padStart(2, '0')}`;
+      weatherCondition = 'Celestial Starlight: Atmospheric Radiance';
+    } else {
+      period = 'Dawn';
+      const daySec = (7 / 24) * this.dayCycleDuration;
+      const remSec = Math.max(0, Math.floor(daySec - this.dayCycleTime));
+      const remMin = Math.floor(remSec / 60);
+      const remS = remSec % 60;
+      nextTransitionLabel = `Midday in ${remMin.toString().padStart(2, '0')}:${remS.toString().padStart(2, '0')}`;
+      weatherCondition = 'Solar Awakening: Cloud Sea Mist';
+    }
+
+    this.clockData = {
+      dayNumber: this.dayNumber,
+      inGameTime: timeString,
+      period,
+      nextTransitionLabel,
+      weatherCondition,
+      dayProgress,
+    };
+
+    // Smooth sun orbit overhead
+    const sunAngle = dayProgress * Math.PI * 2 - Math.PI / 2;
+    this.sunsetLight.position.set(
+      Math.cos(sunAngle) * 70,
+      Math.max(15, Math.sin(sunAngle) * 70),
+      -50
+    );
+
+    // Sync timeOfDay string for backwards compatibility
+    if (period === 'Red Moon Eclipse') {
+      if (this.timeOfDay !== 'red_moon') this.setTimeOfDay('red_moon');
+    } else if (period === 'Night') {
+      if (this.timeOfDay !== 'night') this.setTimeOfDay('night');
+    } else if (period === 'Sunset' || period === 'Dawn') {
+      if (this.timeOfDay !== 'sunset') this.setTimeOfDay('sunset');
+    } else {
+      if (this.timeOfDay !== 'day') this.setTimeOfDay('day');
+    }
+
+    return this.clockData;
+  }
+
   public initPerformanceOptimizations() {
     this.localLights = [];
     this.scene.updateMatrixWorld(true);
@@ -2231,7 +2725,11 @@ export class WorldManager {
     });
 
     // Freeze static groups and meshes so Three.js skips updating their matrices every frame
-    const dynamicKeywords = ['speeder', 'ray', 'wisp', 'prism', 'crystal', 'item', 'torch', 'flame', 'needle', 'humanoid', 'torso', 'leg', 'arm', 'head', 'gasgiant', 'ring', 'dome'];
+    const dynamicKeywords = [
+      'speeder', 'ray', 'wisp', 'prism', 'crystal', 'item', 'torch', 'flame', 'needle',
+      'humanoid', 'torso', 'leg', 'arm', 'head', 'gasgiant', 'ring', 'dome',
+      'turbine', 'portal', 'vortex', 'vault', 'door', 'plant', 'creature', 'mob', 'deer'
+    ];
     this.scene.traverse((obj) => {
       if (obj instanceof THREE.Mesh) {
         let isDynamic = false;
@@ -2256,7 +2754,7 @@ export class WorldManager {
     });
   }
 
-  public update(time: number, delta: number, playerPos?: THREE.Vector3) {
+  public update(time: number, delta: number, playerPos?: THREE.Vector3, onPlayerDamaged?: (amount: number, reason: string) => void) {
     // 1. Consolidated golden cloud sea animation (tight loop, zero closures)
     const numClouds = this.cloudMounds.length;
     for (let i = 0; i < numClouds; i++) {
@@ -2264,7 +2762,7 @@ export class WorldManager {
       c.mesh.position.y = c.origY + Math.sin(time * 0.4 + c.index) * 1.5;
     }
 
-    // 2. Animatables
+    // 2. Animatables (wind turbine, speeders, sky beacons, portal vortex)
     const animCount = this.animatables.length;
     for (let i = 0; i < animCount; i++) {
       this.animatables[i].update(time, delta);
@@ -2312,22 +2810,17 @@ export class WorldManager {
       }
     }
 
-    // 5. Progressive Day-Night Cycle (120 seconds for full loop, unless locked)
-    this.dayCycleTime += delta;
-    if (this.dayCycleTime > 120) {
-      this.dayCycleTime = 0;
+    // 5. Live World Clock & Celestial Day-Night Progression
+    this.updateClock(delta);
+
+    // 6. Custom Plants & Vegetation Day/Night update
+    if (this.plantsManager) {
+      this.plantsManager.update(time, delta, this.timeOfDay);
     }
 
-    // Determine current phase based on cycle time
-    // 0-45s: Day | 45-70s: Sunset | 70-105s: Night | 105-120s: Rare Red Moon window (10% chance)
-    if (this.dayCycleTime < 45 && this.timeOfDay !== 'day') {
-      this.setTimeOfDay('day');
-    } else if (this.dayCycleTime >= 45 && this.dayCycleTime < 70 && this.timeOfDay !== 'sunset') {
-      this.setTimeOfDay('sunset');
-    } else if (this.dayCycleTime >= 70 && this.dayCycleTime < 105 && this.timeOfDay !== 'night') {
-      this.setTimeOfDay('night');
-    } else if (this.dayCycleTime >= 105 && this.timeOfDay !== 'red_moon') {
-      this.setTimeOfDay('red_moon');
+    // 7. Hostile Creatures & Mobs AI update
+    if (this.creaturesManager && playerPos) {
+      this.creaturesManager.update(time, delta, playerPos, onPlayerDamaged);
     }
   }
 

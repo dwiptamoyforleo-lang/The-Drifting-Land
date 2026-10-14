@@ -51,6 +51,14 @@ export class PlayerController {
   public staminaRegenMultiplier: number = 1.0;
   private prevAirVelocityY: number = 0;
 
+  // Combat Strike System
+  public attackPower: number = 28;
+  public attackCooldown: number = 0.35;
+  private attackTimer: number = 0;
+  public isSwingingAttack: boolean = false;
+  private swingAnimTimer: number = 0;
+  public onAttackTriggered?: () => void;
+
   // Callbacks
   public onDamageTaken?: (amount: number, reason: string) => void;
   public onStatsChange?: () => void;
@@ -261,7 +269,33 @@ export class PlayerController {
     this.pitch = Math.max(-0.3, Math.min(1.2, this.pitch));
   }
 
+  public performAttack(): boolean {
+    if (this.attackTimer > 0 || this.isRespawning) return false;
+    this.attackTimer = this.attackCooldown;
+    this.isSwingingAttack = true;
+    this.swingAnimTimer = 0.22;
+    if (this.onAttackTriggered) {
+      this.onAttackTriggered();
+    }
+    return true;
+  }
+
   public update(delta: number) {
+    if (this.attackTimer > 0) {
+      this.attackTimer -= delta;
+    }
+    if (this.swingAnimTimer > 0) {
+      this.swingAnimTimer -= delta;
+      if (this.swingAnimTimer <= 0) {
+        this.isSwingingAttack = false;
+      }
+    }
+
+    if (this.input.primaryAction) {
+      this.performAttack();
+      this.input.primaryAction = false;
+    }
+
     if (this.isRespawning) {
       this.respawnFadeAlpha = Math.min(1.0, this.respawnFadeAlpha + delta * 2.5);
       if (this.respawnFadeAlpha >= 1.0) {
@@ -423,7 +457,11 @@ export class PlayerController {
       this.leftLegMesh.rotation.x = legSwing;
       this.rightLegMesh.rotation.x = -legSwing;
       this.leftArmMesh.rotation.x = -armSwing;
-      this.rightArmMesh.rotation.x = armSwing * 0.3;
+      if (this.isSwingingAttack) {
+        this.rightArmMesh.rotation.x = -Math.PI / 2.2 + Math.sin(this.swingAnimTimer * 16.0) * 0.8;
+      } else {
+        this.rightArmMesh.rotation.x = armSwing * 0.3;
+      }
 
       this.footstepTimer += dt;
       const stepInterval = this.input.sprint ? 0.28 : 0.42;
@@ -435,7 +473,11 @@ export class PlayerController {
       this.leftLegMesh.rotation.x = 0;
       this.rightLegMesh.rotation.x = 0;
       this.leftArmMesh.rotation.x = 0;
-      this.rightArmMesh.rotation.x = 0;
+      if (this.isSwingingAttack) {
+        this.rightArmMesh.rotation.x = -Math.PI / 2.2 + Math.sin(this.swingAnimTimer * 16.0) * 0.8;
+      } else {
+        this.rightArmMesh.rotation.x = 0;
+      }
 
       // Rotate character with camera idle yaw
       this.characterGroup.rotation.y = this.yaw + Math.PI;
@@ -527,20 +569,18 @@ export class PlayerController {
     }
   }
 
-  public heal(amount: number): number {
+  public heal(amount: number, playSound: boolean = false): number {
     const prev = this.health;
     this.health = Math.min(this.maxHealth, this.health + amount);
-    soundSystem.playHeal();
-    if (this.onStatsChange) this.onStatsChange();
+    if (playSound) soundSystem.playHeal();
     return this.health - prev;
   }
 
-  public restoreStamina(amount: number): number {
+  public restoreStamina(amount: number, playSound: boolean = false): number {
     const prev = this.stamina;
     this.stamina = Math.min(this.maxStamina, this.stamina + amount);
     this.isExhausted = false;
-    soundSystem.playHeal();
-    if (this.onStatsChange) this.onStatsChange();
+    if (playSound) soundSystem.playHeal();
     return this.stamina - prev;
   }
 

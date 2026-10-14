@@ -672,6 +672,130 @@ class SoundSystem {
       // Audio error ignored
     }
   }
+
+  /**
+   * Combat kinetic hit strike
+   */
+  public playHit() {
+    if (!this.ctx || !this.sfxGain || this.isMuted) return;
+    try {
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(320, now);
+      osc.frequency.exponentialRampToValueAtTime(70, now + 0.12);
+      gain.gain.setValueAtTime(0.18 * this.sfxVolume, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+      osc.connect(gain);
+      gain.connect(this.sfxGain);
+      osc.start(now);
+      osc.stop(now + 0.13);
+    } catch {
+      // Ignored
+    }
+  }
+
+  /**
+   * Creature defeat dissolution
+   */
+  public playCreatureDefeated() {
+    if (!this.ctx || !this.sfxGain || this.isMuted) return;
+    try {
+      const now = this.ctx.currentTime;
+      const freqs = [180, 150, 110, 80];
+      freqs.forEach((freq, idx) => {
+        if (!this.ctx || !this.sfxGain) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(freq, now + idx * 0.08);
+        gain.gain.setValueAtTime(0.08 * this.sfxVolume, now + idx * 0.08);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 0.25);
+        osc.connect(gain);
+        gain.connect(this.sfxGain);
+        osc.start(now + idx * 0.08);
+        osc.stop(now + idx * 0.08 + 0.26);
+      });
+    } catch {
+      // Ignored
+    }
+  }
+
+  /**
+   * Rare / Epic / Legendary Item celebratory fanfare chime
+   */
+  public playRareItemDrop() {
+    if (!this.ctx || !this.sfxGain || this.isMuted) return;
+    try {
+      const now = this.ctx.currentTime;
+      // Bright triumphant major chord: F5, A5, C6, E6, G6
+      const freqs = [698.46, 880.0, 1046.5, 1318.51, 1567.98];
+      freqs.forEach((freq, idx) => {
+        if (!this.ctx || !this.sfxGain) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        const start = now + idx * 0.06;
+        osc.frequency.setValueAtTime(freq, start);
+        gain.gain.setValueAtTime(0.001, start);
+        gain.gain.linearRampToValueAtTime(0.14 * this.sfxVolume, start + 0.04);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.9);
+        osc.connect(gain);
+        gain.connect(this.sfxGain);
+        osc.start(start);
+        osc.stop(start + 0.95);
+      });
+    } catch {
+      // Ignored
+    }
+  }
+
+  /**
+   * Plant harvest gentle rustle chime
+   */
+  public playPlantHarvest() {
+    if (!this.ctx || !this.sfxGain || this.isMuted) return;
+    try {
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(520, now);
+      osc.frequency.exponentialRampToValueAtTime(840, now + 0.15);
+      gain.gain.setValueAtTime(0.09 * this.sfxVolume, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+      osc.connect(gain);
+      gain.connect(this.sfxGain);
+      osc.start(now);
+      osc.stop(now + 0.19);
+    } catch {
+      // Ignored
+    }
+  }
+
+  /**
+   * Ancient Vault stone rumbling open sound
+   */
+  public playVaultDoor() {
+    if (!this.ctx || !this.sfxGain || this.isMuted) return;
+    try {
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(65, now);
+      osc.frequency.linearRampToValueAtTime(110, now + 1.2);
+      gain.gain.setValueAtTime(0.12 * this.sfxVolume, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 1.4);
+      osc.connect(gain);
+      gain.connect(this.sfxGain);
+      osc.start(now);
+      osc.stop(now + 1.45);
+    } catch {
+      // Ignored
+    }
+  }
 }
 
 export const soundSystem = new SoundSystem();
