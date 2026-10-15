@@ -23,4 +23,15 @@ export class ThreadManager {
       this.ringMesh.rotation.z = time * 0.3;
     }
   }
+
+  public evaluateResonance(anchors: { activated: boolean }[] = []): boolean {
+    const activeCount = anchors.filter(a => a.activated).length;
+    if (this.ringMesh) {
+      const mat = this.ringMesh.material as THREE.MeshBasicMaterial;
+      if (mat) {
+        mat.color.setHex(activeCount >= 3 ? 0xa855f7 : 0x38bdf8);
+      }
+    }
+    return activeCount >= 3;
+  }
 }

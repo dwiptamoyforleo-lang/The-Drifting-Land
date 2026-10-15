@@ -147,7 +147,7 @@ export class GameEngine {
               this.interactions.showToast('TARGET DEFEATED', `${result.creatureName} was neutralized.`);
             }
             if (result.lootItems && result.lootItems.length > 0 && this.onLootAcquired) {
-              result.lootItems.forEach((item) => this.onLootAcquired?.(item.itemId, item.count));
+              result.lootItems.forEach((item: { itemId: string; count: number }) => this.onLootAcquired?.(item.itemId, item.count));
             }
           } else {
             this.interactions.showToast('HIT CONFIRMED', `Dealt ${this.player.attackPower} dmg to ${result.creatureName}`);

@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { WorldManager } from './world';
 import { ThreadManager } from './threads';
 import { PlayerController } from './player';
-import { InteractableObject, DialogueNode, HarvestableResource, WorldCheckpoint } from './types';
+import { InteractableObject, DialogueNode, HarvestableResource, InscriptionLore, WorldCheckpoint } from './types';
 import { soundSystem } from './audio';
 
 export interface InteractionState {
@@ -398,7 +398,7 @@ export class InteractionManager {
   }
 
   private handleResourceInteract(resourceId: string) {
-    const res = this.world.resources.find(r => r.id === resourceId);
+    const res = this.world.resources.find((r: HarvestableResource) => r.id === resourceId);
     if (!res || res.collected) return;
 
     res.collected = true;
@@ -419,7 +419,7 @@ export class InteractionManager {
 
   private handleNpcInteract(npcId: string) {
     const npc = this.world.npcs.find(n => n.id === npcId);
-    if (!npc) return;
+    if (!npc || !npc.dialogue) return;
 
     soundSystem.playDialogueBeep();
     this.activeDialogue = npc.dialogue;
@@ -493,7 +493,7 @@ export class InteractionManager {
   }
 
   private handleInscriptionInteract(inscId: string) {
-    const insc = this.world.inscriptions.find(i => i.id === inscId);
+    const insc = this.world.inscriptions.find((i: InscriptionLore) => i.id === inscId);
     if (!insc) return;
 
     soundSystem.playInscriptionTone();

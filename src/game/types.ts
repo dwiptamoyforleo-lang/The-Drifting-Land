@@ -134,12 +134,12 @@ export interface WorldFragment {
 export interface MagicalAnchor {
   id: string;
   name: string;
-  subtitle: string;
+  subtitle?: string;
   description: string;
   position: [number, number, number];
-  beamColor: number;
+  beamColor?: number;
   activated: boolean;
-  connectsTo: string | null;
+  connectsTo?: string | null;
   mesh?: THREE.Object3D;
   crystalMesh?: THREE.Mesh;
   light?: THREE.PointLight;

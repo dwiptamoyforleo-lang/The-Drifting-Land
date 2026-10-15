@@ -1,4 +1,4 @@
-import { InventoryItem, CraftingRecipe, ItemRarity } from './types';
+import { InventoryItem, CraftingRecipe, ItemRarity, EquipmentSlot } from './types';
 
 export const ITEM_DATABASE: Record<string, InventoryItem> = {
   'mat-stone': {
@@ -132,7 +132,123 @@ export const ITEM_DATABASE: Record<string, InventoryItem> = {
     icon: 'coffee',
     staminaAmount: 50,
   },
+  'mat-moonbloom': {
+    id: 'mat-moonbloom',
+    name: 'Moonbloom Petal',
+    description: 'Fragrant silver-white blossom that only blooms under celestial lunar light.',
+    category: 'resources',
+    rarity: 'rare',
+    quantity: 1,
+    valueCoins: 40,
+    icon: 'sparkles',
+    healAmount: 30,
+    staminaAmount: 25,
+  },
+  'mat-emberfern': {
+    id: 'mat-emberfern',
+    name: 'Emberfern Frond',
+    description: 'Thermal-active botanical frond vibrating with geothermal heat.',
+    category: 'resources',
+    rarity: 'uncommon',
+    quantity: 1,
+    valueCoins: 30,
+    icon: 'flame',
+    staminaAmount: 40,
+  },
+  'mat-driftroot': {
+    id: 'mat-driftroot',
+    name: 'Driftroot Tuber',
+    description: 'Hearty root vegetable harvested from suspended airborne islands.',
+    category: 'resources',
+    rarity: 'common',
+    quantity: 1,
+    valueCoins: 18,
+    icon: 'tree-pine',
+    healAmount: 15,
+  },
+  'mat-glassleaf': {
+    id: 'mat-glassleaf',
+    name: 'Glassleaf Shard',
+    description: 'Translucent crystalline leaf with high silica content.',
+    category: 'resources',
+    rarity: 'rare',
+    quantity: 1,
+    valueCoins: 50,
+    icon: 'gem',
+  },
+  'mat-whispermoss': {
+    id: 'mat-whispermoss',
+    name: 'Whispermoss Clump',
+    description: 'Vibrating moss spores that react to high frequency atmospheric currents.',
+    category: 'resources',
+    rarity: 'uncommon',
+    quantity: 1,
+    valueCoins: 28,
+    icon: 'wind',
+  },
+  'mat-rift-orchid': {
+    id: 'mat-rift-orchid',
+    name: 'Rift Orchid Bloom',
+    description: 'Exotic dimensional flora blooming at the edge of space-time shears.',
+    category: 'resources',
+    rarity: 'epic',
+    quantity: 1,
+    valueCoins: 95,
+    icon: 'radio',
+    healAmount: 60,
+    staminaAmount: 60,
+  },
+  'food-nanite-gel': {
+    id: 'food-nanite-gel',
+    name: 'Aerosol Nanite Gel',
+    description: 'Biomedical pressure spray restoring +85 Health and stabilizing suit integrity.',
+    category: 'food_recovery',
+    rarity: 'rare',
+    quantity: 1,
+    valueCoins: 110,
+    icon: 'shield',
+    healAmount: 85,
+  },
+  'explore-lantern': {
+    id: 'explore-lantern',
+    name: 'Lumenvine Lantern',
+    description: 'Handcrafted luminary powered by live moss fibers; lights up dark ruins.',
+    category: 'tools_equipment',
+    rarity: 'uncommon',
+    quantity: 1,
+    valueCoins: 130,
+    icon: 'flame',
+    equipmentSlot: 'utility',
+  },
 };
+
+export const INITIAL_EQUIPPED_SLOTS: Record<EquipmentSlot, string | null> = {
+  tool: 'tool-survey-multitool',
+  protective: 'armor-kinetic-suit',
+  exploration: null,
+  utility: null,
+  relic: null,
+  artifact: null,
+};
+
+export const INITIAL_HOTBAR_IDS: (string | null)[] = [
+  'tool-survey-multitool',
+  'food-field-medkit',
+  'food-lumenvine-tea',
+  null,
+  null,
+  null,
+];
+
+export const INITIAL_INVENTORY_ITEMS: InventoryItem[] = [
+  { ...ITEM_DATABASE['tool-survey-multitool'], quantity: 1 },
+  { ...ITEM_DATABASE['armor-kinetic-suit'], quantity: 1 },
+  { ...ITEM_DATABASE['food-field-medkit'], quantity: 3 },
+  { ...ITEM_DATABASE['food-lumenvine-tea'], quantity: 2 },
+  { ...ITEM_DATABASE['mat-wood'], quantity: 8 },
+  { ...ITEM_DATABASE['mat-stone'], quantity: 5 },
+  { ...ITEM_DATABASE['mat-lumenvine'], quantity: 4 },
+];
 
 export const CRAFTING_RECIPES: CraftingRecipe[] = [
   {
@@ -173,11 +289,13 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
   },
 ];
 
-export function getRarityColor(rarity: ItemRarity): { bg: string; border: string; text: string; badge: string } {
+export function getRarityColor(rarity?: ItemRarity): { bg: string; border: string; text: string; badge: string } {
   switch (rarity) {
     case 'mythic':
     case 'legendary':
       return { bg: 'bg-amber-950/60', border: 'border-amber-400/80', text: 'text-amber-300', badge: 'bg-amber-950 text-amber-300 border-amber-500/50' };
+    case 'relic':
+      return { bg: 'bg-rose-950/60', border: 'border-rose-400/80', text: 'text-rose-300', badge: 'bg-rose-950 text-rose-300 border-rose-500/50' };
     case 'epic':
       return { bg: 'bg-purple-950/60', border: 'border-purple-400/80', text: 'text-purple-300', badge: 'bg-purple-950 text-purple-300 border-purple-500/50' };
     case 'rare':
