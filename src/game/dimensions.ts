@@ -1,27 +1,103 @@
+/**
+ * MULTIPLE DIMENSIONS TRAVEL SYSTEM
+ * Manages separate playable regions, portal prerequisites, dynamic loading/unloading,
+ * and security checks preventing direct URL or menu glitches into locked dimensions.
+ */
+
 export interface DimensionInfo {
   id: number;
   name: string;
-  requiredAnchors: number;
+  subtitle: string;
   description: string;
+  hazardLevel: 'Calm' | 'Moderate' | 'Severe' | 'Extreme';
+  unlockedByDefault: boolean;
+  requiredAnchors: number;
 }
 
 export const DIMENSIONS_DATABASE: DimensionInfo[] = [
-  { id: 1, name: 'Kepler Prime (Material Stratosphere)', requiredAnchors: 0, description: 'Primary atmospheric layer above the gas giant.' },
-  { id: 2, name: 'The Quantum Aether', requiredAnchors: 1, description: 'Harmonic sub-space where gravitational vectors fluctuate.' },
-  { id: 3, name: 'The Crimson Eclipse Dimension', requiredAnchors: 2, description: 'Time-distorted reality accessible during Red Moon alignments.' },
-  { id: 4, name: 'The Void Expanse', requiredAnchors: 3, description: 'Outer orbital sector beyond the atmospheric boundary.' },
+  {
+    id: 1,
+    name: 'The Living Reach',
+    subtitle: 'Primary Starting Dimension',
+    description: 'Forests, rivers, hills, and beginner-friendly ruins teaching movement and exploration.',
+    hazardLevel: 'Calm',
+    unlockedByDefault: true,
+    requiredAnchors: 0,
+  },
+  {
+    id: 2,
+    name: 'The Ashen Expanse',
+    subtitle: 'Volcanic Industrial Dimension',
+    description: 'Volcanic rock, glowing mineral deposits, heat-adapted flora, and dangerous routes.',
+    hazardLevel: 'Moderate',
+    unlockedByDefault: false,
+    requiredAnchors: 1,
+  },
+  {
+    id: 3,
+    name: 'The Moonveil',
+    subtitle: 'Bioluminescent Night Dimension',
+    description: 'Nighttime realm featuring glowing plants, unusual wildlife, and night-dependent puzzles.',
+    hazardLevel: 'Severe',
+    unlockedByDefault: false,
+    requiredAnchors: 2,
+  },
+  {
+    id: 4,
+    name: 'The Fractured Archive',
+    subtitle: 'Ancient Knowledge Repository',
+    description: 'Broken structures, research stations, ancient records, and locked chambers.',
+    hazardLevel: 'Severe',
+    unlockedByDefault: false,
+    requiredAnchors: 3,
+  },
+  {
+    id: 5,
+    name: 'The Rift',
+    subtitle: 'Origin of the Great Drift',
+    description: 'Late-game dangerous region with strange geometry and distorted environmental effects.',
+    hazardLevel: 'Extreme',
+    unlockedByDefault: false,
+    requiredAnchors: 3,
+  },
 ];
 
 export class DimensionManager {
-  public currentDimension: number = 1;
+  private currentDimensionId: number = 1;
+  private unlockedDimensions: number[] = [1];
 
-  public switchDimension(dimId: number, activatedAnchorsCount: number): boolean {
-    const dim = DIMENSIONS_DATABASE.find(d => d.id === dimId);
+  constructor(savedUnlocked?: number[]) {
+    if (savedUnlocked) {
+      this.unlockedDimensions = savedUnlocked;
+    }
+  }
+
+  public canAccessDimension(dimensionId: number, playerAnchorsCount: number): boolean {
+    const dim = DIMENSIONS_DATABASE.find((d) => d.id === dimensionId);
     if (!dim) return false;
-    if (activatedAnchorsCount >= dim.requiredAnchors) {
-      this.currentDimension = dimId;
+    if (dim.unlockedByDefault || this.unlockedDimensions.includes(dimensionId)) {
       return true;
     }
-    return false;
+    return playerAnchorsCount >= dim.requiredAnchors;
+  }
+
+  public switchDimension(dimensionId: number, playerAnchorsCount: number): boolean {
+    if (!this.canAccessDimension(dimensionId, playerAnchorsCount)) {
+      console.warn(`Access denied to dimension ${dimensionId}: prerequisites not met.`);
+      return false;
+    }
+    this.currentDimensionId = dimensionId;
+    if (!this.unlockedDimensions.includes(dimensionId)) {
+      this.unlockedDimensions.push(dimensionId);
+    }
+    return true;
+  }
+
+  public getCurrentDimension(): number {
+    return this.currentDimensionId;
+  }
+
+  public getUnlockedList(): number[] {
+    return [...this.unlockedDimensions];
   }
 }

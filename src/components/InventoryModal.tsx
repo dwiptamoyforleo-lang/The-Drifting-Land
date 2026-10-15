@@ -110,6 +110,8 @@ export const InventoryModal: React.FC<InventoryModalProps> = ({
     if (sortBy === 'category') return a.category.localeCompare(b.category);
     if (sortBy === 'rarity') {
       const rarityRank: Record<ItemRarity, number> = {
+        mythic: 7,
+        legendary: 6,
         relic: 5,
         epic: 4,
         rare: 3,

@@ -24,7 +24,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   ambientVolume: 0.7,
   sfxVolume: 0.85,
   showFps: false,
-  cameraMode: 'third_person',
+  cameraMode: 'first_person',
   joystickSize: 'medium',
   buttonOpacity: 0.85,
 };

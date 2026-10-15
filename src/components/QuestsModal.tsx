@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { X, CheckCircle2, Circle, Target, Award } from 'lucide-react';
-import { Quest } from '../game/types';
+import { Quest } from '../game/quests';
 
 interface QuestsModalProps {
   quests: Quest[];
