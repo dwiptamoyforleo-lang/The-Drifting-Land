@@ -425,20 +425,19 @@ export class PlayerController {
 
   private checkGroundCollision(probePos: THREE.Vector3): number {
     if (this.walkableMeshes.length === 0) {
-      return 4.2;
+      return 0.0;
     }
 
-    this._rayOrigin.set(probePos.x, probePos.y + 1.2, probePos.z);
+    this._rayOrigin.set(probePos.x, probePos.y + 3.0, probePos.z);
     this.raycaster.set(this._rayOrigin, this._rayDir);
 
     this._raycastHits.length = 0;
     this.raycaster.intersectObjects(this.walkableMeshes, false, this._raycastHits);
     if (this._raycastHits.length > 0) {
-      const topHit = this._raycastHits[0].point.y;
-      return Math.max(topHit, 4.2);
+      return this._raycastHits[0].point.y;
     }
 
-    return 4.2;
+    return -100.0;
   }
 
   private updateCharacterAnimation(dt: number, isMoving: boolean, moveDir: THREE.Vector3) {

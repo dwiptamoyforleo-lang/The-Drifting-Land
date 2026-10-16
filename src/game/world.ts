@@ -12,6 +12,9 @@ import {
 } from './types';
 import { CreatureManager } from './creatures';
 import { PlantManager } from './plants';
+import { WorldGenerator } from './worldGen';
+import { WeatherSystem } from './weather';
+import { RedMoonEventSystem } from './redMoonBoss';
 
 export interface NPCInfo {
   id: string;
@@ -34,6 +37,9 @@ export class WorldManager {
   public inscriptions: InscriptionLore[] = [];
   public creatureManager!: CreatureManager;
   public plantsManager!: PlantManager;
+  public worldGen: WorldGenerator = new WorldGenerator();
+  public weatherSystem: WeatherSystem = new WeatherSystem();
+  public redMoonSystem: RedMoonEventSystem = new RedMoonEventSystem();
   public timeOfDay: TimeOfDay = 'day';
 
   public get creaturesManager(): CreatureManager {
@@ -103,6 +109,9 @@ export class WorldManager {
 
     // 5. Plants & Vegetation Ecosystem
     this.plantsManager = new PlantManager(this.scene);
+
+    // 6. Procedural Open World Terrain, Forests, Rivers & Ruins
+    this.worldGen.updateChunks(new THREE.Vector3(0, 4.2, 0), this.scene, this.walkableMeshes);
 
     // 6. Anchors
     this.anchors = [
@@ -255,22 +264,37 @@ export class WorldManager {
   }
 
   public get clockData(): WorldClockData {
+    const isRedMoon = this.redMoonSystem.state.isActive;
+    const period = isRedMoon ? 'Red Moon Eclipse' : (this.timeOfDay === 'night' ? 'Night' : (this.timeOfDay === 'sunset' ? 'Sunset' : 'Day'));
+    const weatherLabel = this.weatherSystem ? this.weatherSystem.state.current.replace(/_/g, ' ').toUpperCase() : 'SOLAR CALM';
     return {
-      dayNumber: 1,
-      inGameTime: '12:00',
-      period: 'Day',
-      nextTransitionLabel: 'Sunset in 04:30',
-      weatherCondition: 'Solar Calm',
+      dayNumber: this.redMoonSystem.state.nightCount + 1,
+      inGameTime: '14:20',
+      period,
+      nextTransitionLabel: isRedMoon ? 'Red Moon Eclipse Active' : (this.timeOfDay === 'night' ? 'Sunrise in 03:15' : 'Sunset in 04:30'),
+      weatherCondition: weatherLabel,
       dayProgress: 0.5,
     };
   }
 
   public update(time: number, delta: number, playerPos: THREE.Vector3, onDamage?: (dmg: number, reason: string) => void) {
+    if (this.weatherSystem) {
+      this.weatherSystem.update(delta, playerPos.y);
+    }
+    if (this.worldGen) {
+      this.worldGen.updateChunks(playerPos, this.scene, this.walkableMeshes);
+    }
     if (this.creatureManager) {
       this.creatureManager.update(time, delta, playerPos, onDamage);
     }
     if (this.plantsManager) {
       this.plantsManager.update(time, delta, this.timeOfDay);
+    }
+  }
+
+  public destroy() {
+    if (this.worldGen) {
+      this.worldGen.destroy();
     }
   }
 }

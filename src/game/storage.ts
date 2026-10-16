@@ -5,6 +5,7 @@ import { GameProgress, GameSettings, UserProfile } from './types';
 import { INITIAL_INVENTORY_ITEMS, INITIAL_EQUIPPED_SLOTS, INITIAL_HOTBAR_IDS } from './itemDatabase';
 
 const STORAGE_KEY_PROGRESS = 'the_drifting_world_progress_v2';
+const STORAGE_KEY_PROGRESS_BACKUP = 'the_drifting_world_progress_v2_backup';
 const STORAGE_KEY_SETTINGS = 'the_drifting_world_settings_v1';
 const STORAGE_KEY_PROFILE = 'the_drifting_world_profile_v1';
 
@@ -65,29 +66,66 @@ export function saveSettings(settings: GameSettings) {
   }
 }
 
+function sanitizeProgress(parsed: Partial<GameProgress>): GameProgress {
+  const coins = typeof parsed.coins === 'number' && Number.isFinite(parsed.coins) ? Math.max(0, Math.floor(parsed.coins)) : INITIAL_PROGRESS.coins;
+  const lastCheckpoint: [number, number, number] = Array.isArray(parsed.lastCheckpoint) && parsed.lastCheckpoint.length === 3 && parsed.lastCheckpoint.every(n => typeof n === 'number' && Number.isFinite(n))
+    ? [parsed.lastCheckpoint[0], parsed.lastCheckpoint[1], parsed.lastCheckpoint[2]]
+    : INITIAL_PROGRESS.lastCheckpoint;
+
+  return {
+    ...INITIAL_PROGRESS,
+    ...parsed,
+    coins,
+    lastCheckpoint,
+    inventory: Array.isArray(parsed.inventory) ? parsed.inventory : INITIAL_INVENTORY_ITEMS,
+    equipped: parsed.equipped && typeof parsed.equipped === 'object' ? { ...INITIAL_EQUIPPED_SLOTS, ...parsed.equipped } : INITIAL_EQUIPPED_SLOTS,
+    hotbar: Array.isArray(parsed.hotbar) ? parsed.hotbar : INITIAL_HOTBAR_IDS,
+    activatedAnchors: Array.isArray(parsed.activatedAnchors) ? parsed.activatedAnchors : [],
+    collectedFragments: Array.isArray(parsed.collectedFragments) ? parsed.collectedFragments : [],
+    activatedCheckpoints: Array.isArray(parsed.activatedCheckpoints) ? parsed.activatedCheckpoints : [],
+    collectedResources: Array.isArray(parsed.collectedResources) ? parsed.collectedResources : [],
+    completedQuests: Array.isArray(parsed.completedQuests) ? parsed.completedQuests : [],
+  };
+}
+
 export function loadProgress(): GameProgress {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_PROGRESS);
     if (raw) {
-      return { ...INITIAL_PROGRESS, ...JSON.parse(raw) };
+      return sanitizeProgress(JSON.parse(raw));
     }
   } catch {
-    // ignore
+    // Primary slot error, try backup slot
+    try {
+      const backup = localStorage.getItem(STORAGE_KEY_PROGRESS_BACKUP);
+      if (backup) {
+        return sanitizeProgress(JSON.parse(backup));
+      }
+    } catch {
+      // ignore
+    }
   }
   return { ...INITIAL_PROGRESS };
 }
 
 export function saveProgress(progress: GameProgress) {
   try {
-    localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(progress));
+    const serialized = JSON.stringify(progress);
+    // Keep previous state as backup before overwriting
+    const existing = localStorage.getItem(STORAGE_KEY_PROGRESS);
+    if (existing) {
+      localStorage.setItem(STORAGE_KEY_PROGRESS_BACKUP, existing);
+    }
+    localStorage.setItem(STORAGE_KEY_PROGRESS, serialized);
   } catch {
-    // ignore
+    // ignore quota errors
   }
 }
 
 export function clearProgress(): GameProgress {
   try {
     localStorage.removeItem(STORAGE_KEY_PROGRESS);
+    localStorage.removeItem(STORAGE_KEY_PROGRESS_BACKUP);
   } catch {
     // ignore
   }

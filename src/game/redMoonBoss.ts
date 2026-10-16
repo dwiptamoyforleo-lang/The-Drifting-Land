@@ -15,7 +15,7 @@ export interface RedMoonState {
 }
 
 export class RedMoonEventSystem {
-  private state: RedMoonState;
+  public state: RedMoonState;
   private saveKey = 'the_drifting_world_red_moon_v1';
 
   constructor() {

@@ -466,6 +466,10 @@ export class GameEngine {
     });
     this.cleanupListeners = [];
 
+    if (this.world) {
+      this.world.destroy();
+    }
+
     if (this.renderer) {
       this.renderer.dispose();
       this.renderer.forceContextLoss();
