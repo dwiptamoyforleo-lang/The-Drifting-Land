@@ -1,0 +1,6 @@
+{
+  "name": "The Drifting Land",
+  "description": "An atmospheric 3D open-world exploration, survival, and adventure game set across fractured floating islands.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

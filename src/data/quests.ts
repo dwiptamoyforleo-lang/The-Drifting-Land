@@ -1,0 +1,106 @@
+/**
+ * Data-driven quest definitions for The Drifting Land.
+ */
+
+import { QuestDefinition } from '../types/game';
+
+export const QUEST_CATALOG: Record<string, QuestDefinition> = {
+  quest_awaken_beacon: {
+    id: 'quest_awaken_beacon',
+    title: 'Awakening The Verdant Reach',
+    giverName: 'Ancient Inscription',
+    regionId: 'verdant_reach',
+    description: 'Restore celestial power to the central Monolith Beacon by recovering the four lost elemental Drift Shards scattered across the floating isle.',
+    loreSnippet: 'When the four keystones reunite, the ancient beacon will rekindle its aether beacon to guide lost voyagers.',
+    objectives: [
+      {
+        id: 'obj_gather_shards',
+        description: 'Collect all 4 Drift Shards across the archipelago',
+        targetCount: 4,
+        currentCount: 0,
+        completed: false,
+        type: 'COLLECT',
+      },
+      {
+        id: 'obj_activate_monolith',
+        description: 'Interact with the central dais to awaken the Ancient Monolith Beacon',
+        targetCount: 1,
+        currentCount: 0,
+        completed: false,
+        type: 'ACTIVATE_BEACON',
+        targetId: 'verdant_monolith_beacon',
+      },
+    ],
+    rewards: {
+      experience: 500,
+      coins: 150,
+      items: [
+        { itemId: 'aether_surge_tonic', quantity: 2 },
+        { itemId: 'aether_core_prism', quantity: 1 },
+      ],
+    },
+  },
+
+  quest_herbs_of_vale: {
+    id: 'quest_herbs_of_vale',
+    title: 'Botanist of the Islets',
+    giverName: 'Surveyor Kaelen',
+    regionId: 'verdant_reach',
+    description: 'Forage Verdant Moss Fiber from the ancient stone ruins to aid the wandering expedition.',
+    loreSnippet: 'The moss absorbs aether from passing mist, making it an indispensable binding agent.',
+    objectives: [
+      {
+        id: 'obj_gather_moss',
+        description: 'Forage Verdant Moss Fibers',
+        targetCount: 3,
+        currentCount: 0,
+        completed: false,
+        type: 'COLLECT',
+        targetId: 'verdant_moss_fiber',
+      },
+    ],
+    rewards: {
+      experience: 150,
+      coins: 45,
+      items: [
+        { itemId: 'traveler_rations', quantity: 3 },
+      ],
+    },
+  },
+
+  quest_survey_ruins: {
+    id: 'quest_survey_ruins',
+    title: 'Echoes of the Great Drift',
+    giverName: 'Surveyor Kaelen',
+    regionId: 'verdant_reach',
+    description: 'Explore and discover the three historic ruin viewpoints overlooking the cloud sea.',
+    loreSnippet: 'The fracture lines along the stone pillars match the celestial constellations.',
+    objectives: [
+      {
+        id: 'obj_discover_overlook',
+        description: 'Discover the Sunward Promontory Waystone',
+        targetCount: 1,
+        currentCount: 0,
+        completed: false,
+        type: 'DISCOVER',
+        targetId: 'cp_eastern_ridge',
+      },
+      {
+        id: 'obj_discover_canopy',
+        description: 'Discover the Sunken Ruin Sanctum Waystone',
+        targetCount: 1,
+        currentCount: 0,
+        completed: false,
+        type: 'DISCOVER',
+        targetId: 'cp_elder_groove',
+      },
+    ],
+    rewards: {
+      experience: 250,
+      coins: 80,
+      items: [
+        { itemId: 'drift_bloom_nectar', quantity: 4 },
+      ],
+    },
+  },
+};
