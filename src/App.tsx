@@ -6,7 +6,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { GameMode, SaveData, GameSettings, ShardRelic } from './types/game';
+import { GameMode, SaveData, GameSettings, ShardRelic, CrimsonWardenState, WeatherType } from './types/game';
 import { StorageService, createInitialSave } from './services/storage';
 import { GameEngine } from './engine/gameLoop';
 import { GameCanvas } from './components/GameCanvas';
@@ -20,6 +20,7 @@ import { MapModal } from './components/MapModal';
 import { DialogueModal } from './components/DialogueModal';
 import { NotificationToast } from './components/NotificationToast';
 import { DiagnosticScreen } from './components/DiagnosticScreen';
+import { DevPanel } from './components/DevPanel';
 import { AudioService } from './services/audio';
 
 export default function App() {
@@ -27,6 +28,8 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isInitializing, setIsInitializing] = useState<boolean>(true);
   const [cameraLabel, setCameraLabel] = useState<string>('THIRD PERSON');
+  const [isDevPanelOpen, setIsDevPanelOpen] = useState<boolean>(false);
+  const [bossState, setBossState] = useState<CrimsonWardenState | null>(null);
 
   // Persistent save and settings
   const [activeSave, setActiveSave] = useState<SaveData>(() => StorageService.loadSave());
@@ -44,11 +47,22 @@ export default function App() {
     experienceToNext: 200,
   });
 
-  const [timeState, setTimeState] = useState({
+  const [timeState, setTimeState] = useState<{
+    phase: string;
+    cycleTime: number;
+    dayCount: number;
+    isRedMoon: boolean;
+    clockTime: string;
+    nextTransitionLabel: string;
+    nextTransitionSeconds: number;
+  }>({
     phase: 'DAWN',
     cycleTime: 0.18,
     dayCount: 1,
     isRedMoon: false,
+    clockTime: '06:00',
+    nextTransitionLabel: 'Sunset',
+    nextTransitionSeconds: 780,
   });
 
   const [weatherName, setWeatherName] = useState<string>('CLEAR');
@@ -125,6 +139,7 @@ export default function App() {
           onCameraModeChange: (_cmode, label) => {
             setCameraLabel(label);
           },
+          onBossStateUpdate: (boss) => setBossState(boss),
         },
         currentSave
       );
@@ -193,8 +208,44 @@ export default function App() {
   };
 
   const handleToggleRedMoon = () => {
-    engineRef.current?.toggleRedMoon();
+    engineRef.current?.devToggleRedMoon();
   };
+
+  const handleDevToggleRedMoon = (force?: boolean): boolean => {
+    return engineRef.current ? engineRef.current.devToggleRedMoon(force) : false;
+  };
+
+  const handleDevJumpPhase = (phase: 'DAWN' | 'NOON' | 'DUSK' | 'NIGHT') => {
+    engineRef.current?.devJumpPhase(phase);
+  };
+
+  const handleDevAdvanceTime = (seconds: number) => {
+    engineRef.current?.devAdvanceTime(seconds);
+  };
+
+  const handleDevSetWeather = (weather: WeatherType) => {
+    engineRef.current?.devSetWeather(weather);
+  };
+
+  const handleDevResetCooldown = () => {
+    engineRef.current?.devResetRedMoonCooldown();
+  };
+
+  const handleDevTeleport = (x: number, z: number) => {
+    engineRef.current?.devTeleport(x, z);
+  };
+
+  // Global F1 or ` hotkey for DevPanel
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === '`' || e.code === 'F1') {
+        e.preventDefault();
+        setIsDevPanelOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, []);
 
   const handleSwitchCamera = () => {
     if (engineRef.current) {
@@ -285,6 +336,7 @@ export default function App() {
         <HUD
           stats={stats}
           timeState={timeState}
+          bossState={bossState}
           weatherName={weatherName}
           relics={relics}
           beaconActivated={beaconActivated}
@@ -305,11 +357,27 @@ export default function App() {
           onToggleSound={handleToggleSound}
           soundEnabled={settings.soundEnabled}
           onToggleRedMoon={handleToggleRedMoon}
+          onOpenDevPanel={() => setIsDevPanelOpen(true)}
           showTouchControls={isTouchDevice || settings.touchControls}
           onJoystickMove={handleJoystickMove}
           onTouchAction={handleTouchAction}
         />
       )}
+
+      {/* Developer-Only Testing Suite (Separate from player settings) */}
+      <DevPanel
+        isOpen={isDevPanelOpen}
+        onClose={() => setIsDevPanelOpen(false)}
+        onToggleRedMoon={handleDevToggleRedMoon}
+        onJumpPhase={handleDevJumpPhase}
+        onAdvanceTime={handleDevAdvanceTime}
+        onSetWeather={handleDevSetWeather}
+        onResetCooldown={handleDevResetCooldown}
+        onTeleport={handleDevTeleport}
+        isRedMoon={timeState.isRedMoon}
+        clockTime={timeState.clockTime}
+        dayCount={timeState.dayCount}
+      />
 
       {/* Dialogue Box Overlay */}
       {activeDialogue && (

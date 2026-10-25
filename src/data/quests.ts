@@ -103,4 +103,40 @@ export const QUEST_CATALOG: Record<string, QuestDefinition> = {
       ],
     },
   },
+
+  quest_blood_moon_eclipse: {
+    id: 'quest_blood_moon_eclipse',
+    title: 'The Blood Moon Eclipse',
+    giverName: 'Celestial Omen',
+    regionId: 'verdant_reach',
+    description: 'An ancient rift has opened beneath the blood moon at the western crater. Confront the Crimson Warden and claim the fallen celestial core.',
+    loreSnippet: 'When the sky bleeds crimson, the forgotten warden emerges from the void fracture to test the unworthy.',
+    objectives: [
+      {
+        id: 'obj_gather_bloodroot',
+        description: 'Forage a rare Bloodroot Orchid under the eclipse',
+        targetCount: 1,
+        currentCount: 0,
+        completed: false,
+        type: 'COLLECT',
+        targetId: 'bloodroot_orchid',
+      },
+      {
+        id: 'obj_defeat_warden',
+        description: 'Defeat the Crimson Warden at the Shattered Rift Crater',
+        targetCount: 1,
+        currentCount: 0,
+        completed: false,
+        type: 'DEFEAT_BOSS',
+        targetId: 'crimson_warden',
+      },
+    ],
+    rewards: {
+      experience: 400,
+      coins: 150,
+      items: [
+        { itemId: 'wardens_blood_amulet', quantity: 1 },
+      ],
+    },
+  },
 };

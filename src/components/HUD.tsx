@@ -25,8 +25,11 @@ import {
   Cloud,
   Eye,
   Map,
+  Wrench,
+  Skull,
+  AlertTriangle,
 } from 'lucide-react';
-import { ShardRelic } from '../types/game';
+import { ShardRelic, CrimsonWardenState } from '../types/game';
 
 interface HUDProps {
   stats: {
@@ -43,7 +46,11 @@ interface HUDProps {
     cycleTime: number;
     dayCount: number;
     isRedMoon: boolean;
+    clockTime?: string;
+    nextTransitionLabel?: string;
+    nextTransitionSeconds?: number;
   };
+  bossState?: CrimsonWardenState | null;
   weatherName: string;
   relics: {
     shards: ShardRelic[];
@@ -62,6 +69,7 @@ interface HUDProps {
   onToggleSound: () => void;
   soundEnabled: boolean;
   onToggleRedMoon: () => void;
+  onOpenDevPanel?: () => void;
   showTouchControls: boolean;
   onJoystickMove: (x: number, y: number) => void;
   onTouchAction: (action: 'jump' | 'dash' | 'interact' | 'sprint', active: boolean) => void;
@@ -70,6 +78,7 @@ interface HUDProps {
 export const HUD: React.FC<HUDProps> = ({
   stats,
   timeState,
+  bossState,
   weatherName,
   relics,
   beaconActivated,
@@ -84,6 +93,7 @@ export const HUD: React.FC<HUDProps> = ({
   onToggleSound,
   soundEnabled,
   onToggleRedMoon,
+  onOpenDevPanel,
   showTouchControls,
   onJoystickMove,
   onTouchAction,
@@ -208,29 +218,71 @@ export const HUD: React.FC<HUDProps> = ({
           </div>
         </div>
 
-        {/* Top-Center: Camera Perspective Mode Badge */}
-        <div className="pointer-events-auto flex flex-col items-center">
-          <button
-            onClick={onSwitchCamera}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#0c121d]/90 hover:bg-[#1a2332] active:bg-[#253245] border border-cyan-500/30 text-cyan-300 shadow-xl transition-all cursor-pointer group"
-            title="Switch Camera Perspective (V)"
-          >
-            <Eye className="w-3.5 h-3.5 text-cyan-400 group-hover:rotate-12 transition-transform" />
-            <span className="font-mono font-bold tracking-wider text-[10px] sm:text-[11px]">
-              {cameraLabel}
-            </span>
-            <span className="hidden sm:inline-block text-[9px] text-cyan-500/70 font-mono ml-0.5">
-              [V]
-            </span>
-          </button>
+        {/* Top-Center: Crimson Warden Boss Bar (or Camera Badge) */}
+        <div className="pointer-events-auto flex flex-col items-center flex-1 max-w-sm sm:max-w-md mx-2">
+          {bossState?.active ? (
+            <div className="w-full flex flex-col items-center bg-[#150508]/95 border-2 border-red-600/80 rounded-2xl p-2 sm:p-2.5 shadow-2xl animate-pulse">
+              <div className="w-full flex items-center justify-between text-xs font-mono mb-1">
+                <div className="flex items-center gap-1.5 text-red-300 font-bold tracking-wider">
+                  <Skull className="w-4 h-4 text-red-500 animate-spin" />
+                  <span className="text-[11px] sm:text-xs">CRIMSON WARDEN</span>
+                </div>
+                <span
+                  className={`text-[10px] px-1.5 py-0.2 rounded font-bold ${
+                    bossState.phase === 2
+                      ? 'bg-red-800 text-white animate-bounce'
+                      : 'bg-red-950 text-red-300'
+                  }`}
+                >
+                  {bossState.phase === 2 ? 'PHASE 2: ENRAGED' : 'PHASE 1'}
+                </span>
+                <span className="text-[11px] font-mono tabular-nums text-red-200">
+                  {bossState.health} / {bossState.maxHealth}
+                </span>
+              </div>
+
+              {/* Boss HP Bar */}
+              <div className="w-full h-2.5 bg-slate-950 rounded-full overflow-hidden p-0.5 border border-red-800/80">
+                <div
+                  className="h-full bg-gradient-to-r from-red-600 to-rose-400 rounded-full transition-all duration-150"
+                  style={{ width: `${(bossState.health / bossState.maxHealth) * 100}%` }}
+                />
+              </div>
+
+              {/* Attack Warning Banner */}
+              {bossState.attackWarning && (
+                <div className="mt-1 flex items-center gap-1 text-[10px] text-amber-300 font-bold uppercase tracking-wider animate-bounce">
+                  <AlertTriangle className="w-3 h-3 text-red-500" />
+                  <span>
+                    WARNING: {bossState.attackWarning.type} ({Math.round(bossState.attackWarning.progress * 100)}%)
+                  </span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <button
+              onClick={onSwitchCamera}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#0c121d]/90 hover:bg-[#1a2332] active:bg-[#253245] border border-cyan-500/30 text-cyan-300 shadow-xl transition-all cursor-pointer group"
+              title="Switch Camera Perspective (V)"
+            >
+              <Eye className="w-3.5 h-3.5 text-cyan-400 group-hover:rotate-12 transition-transform" />
+              <span className="font-mono font-bold tracking-wider text-[10px] sm:text-[11px]">
+                {cameraLabel}
+              </span>
+              <span className="hidden sm:inline-block text-[9px] text-cyan-500/70 font-mono ml-0.5">
+                [V]
+              </span>
+            </button>
+          )}
         </div>
 
-        {/* Top-Right: Celestial Time, Weather & Pause Cluster */}
+        {/* Top-Right: Celestial Time, Countdown, Weather & Dev Cluster */}
         <div className="flex items-center gap-1.5 sm:gap-2 pointer-events-auto">
-          <div className="bg-[#0c121d]/90 border border-slate-800/90 rounded-2xl px-2.5 sm:px-3.5 py-1.5 sm:py-2 shadow-xl flex items-center gap-2 sm:gap-3">
-            <div className="flex items-center gap-1 text-[11px] sm:text-xs font-mono">
+          <div className="bg-[#0c121d]/90 border border-slate-800/90 rounded-2xl px-2.5 sm:px-3 py-1.5 sm:py-2 shadow-xl flex items-center gap-2 sm:gap-2.5">
+            {/* Phase & Clock */}
+            <div className="flex items-center gap-1.5 text-[11px] sm:text-xs font-mono">
               {timeState.phase === 'RED_MOON' ? (
-                <Moon className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-red-500" />
+                <Moon className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-red-500 animate-pulse" />
               ) : timeState.phase === 'NIGHT' ? (
                 <Moon className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-indigo-300" />
               ) : (
@@ -243,14 +295,38 @@ export const HUD: React.FC<HUDProps> = ({
               >
                 {timeState.phase}
               </span>
+              {timeState.clockTime && (
+                <span className="text-cyan-300 font-bold tabular-nums">
+                  {timeState.clockTime}
+                </span>
+              )}
             </div>
+
+            {/* Countdown to next sunrise / sunset */}
+            {timeState.nextTransitionLabel && typeof timeState.nextTransitionSeconds === 'number' && (
+              <>
+                <span className="w-px h-3 bg-slate-700 hidden md:block" />
+                <span className="text-[10px] sm:text-[11px] font-mono text-slate-400 tabular-nums hidden md:inline">
+                  {timeState.nextTransitionLabel} in{' '}
+                  <span className="text-amber-300 font-bold">
+                    {Math.floor(timeState.nextTransitionSeconds / 60)
+                      .toString()
+                      .padStart(2, '0')}
+                    :
+                    {Math.floor(timeState.nextTransitionSeconds % 60)
+                      .toString()
+                      .padStart(2, '0')}
+                  </span>
+                </span>
+              </>
+            )}
 
             <span className="w-px h-3 bg-slate-700 hidden sm:block" />
 
             {/* Weather indicator */}
             <div className="hidden sm:flex items-center gap-1 text-[11px] font-mono text-cyan-300">
               <Cloud className="w-3.5 h-3.5 text-cyan-400" />
-              <span>{weatherName}</span>
+              <span className="truncate max-w-[80px]">{weatherName}</span>
             </div>
 
             <span className="w-px h-3 bg-slate-700 hidden sm:block" />
@@ -259,6 +335,18 @@ export const HUD: React.FC<HUDProps> = ({
               DAY {timeState.dayCount}
             </span>
           </div>
+
+          {/* Dev Suite Trigger Button */}
+          {onOpenDevPanel && (
+            <button
+              onClick={onOpenDevPanel}
+              className="px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-2xl bg-amber-950/60 hover:bg-amber-900/80 border border-amber-600/50 text-[11px] sm:text-xs font-mono text-amber-300 hover:text-white transition-colors cursor-pointer flex items-center gap-1"
+              title="Open Developer Testing Suite (F1 or `)"
+            >
+              <Wrench className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden sm:inline">DEV</span>
+            </button>
+          )}
 
           <button
             onClick={onTogglePause}

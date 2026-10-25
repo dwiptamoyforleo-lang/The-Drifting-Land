@@ -21,6 +21,8 @@ export const DEFAULT_SETTINGS: GameSettings = {
   cameraMode: 'THIRD_PERSON',
   cameraSensitivity: 1.0,
   cameraDistance: 7.5,
+  particleLimit: 600,
+  dayDurationMinutes: 20,
 };
 
 export const DEFAULT_STATS: PlayerStats = {
@@ -66,6 +68,13 @@ export function createInitialSave(): SaveData {
       dayCount: 1,
     },
     currentWeather: 'CLEAR',
+    redMoon: {
+      isActive: false,
+      lastEvaluatedNightDay: 0,
+      cooldownUntilDay: 3,
+      wardenDefeated: false,
+      wardenRewardsClaimed: false,
+    },
     settings: { ...DEFAULT_SETTINGS },
     discoveries: ['The Verdant Reach', 'Ancient Floating Spire', 'Monolith Beacon Plaza'],
   };
@@ -258,6 +267,14 @@ export class StorageService {
         dayCount: Number.isFinite(raw.worldTime?.dayCount) ? raw.worldTime.dayCount : fallback.worldTime.dayCount,
       },
       currentWeather: typeof raw.currentWeather === 'string' ? (raw.currentWeather as WeatherType) : fallback.currentWeather,
+      redMoon: {
+        isActive: typeof raw.redMoon?.isActive === 'boolean' ? raw.redMoon.isActive : false,
+        lastEvaluatedNightDay: Number.isFinite(raw.redMoon?.lastEvaluatedNightDay) ? raw.redMoon.lastEvaluatedNightDay : 0,
+        cooldownUntilDay: Number.isFinite(raw.redMoon?.cooldownUntilDay) ? raw.redMoon.cooldownUntilDay : 0,
+        wardenDefeated: typeof raw.redMoon?.wardenDefeated === 'boolean' ? raw.redMoon.wardenDefeated : false,
+        wardenRewardsClaimed: typeof raw.redMoon?.wardenRewardsClaimed === 'boolean' ? raw.redMoon.wardenRewardsClaimed : false,
+        forceTriggered: !!raw.redMoon?.forceTriggered,
+      },
       settings: { ...DEFAULT_SETTINGS, ...(raw.settings || {}) },
       discoveries: Array.isArray(raw.discoveries) ? raw.discoveries : fallback.discoveries,
     };

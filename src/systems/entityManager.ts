@@ -133,15 +133,19 @@ export class EntityManager {
   }
 
   /**
-   * Composite Procedural Aether Wisp Critter
+   * Composite Procedural Aether Wisp Critter (or Mutated Crimson Wisp)
    */
   private createAetherWisp(def: WorldEntityDefinition, group: THREE.Group, groundY: number): RuntimeEntity {
+    const isCrimson = def.id.includes('crimson');
+    const color = isCrimson ? 0xef4444 : 0x38bdf8;
+    const emissive = isCrimson ? 0xdc2626 : 0x0284c7;
+
     // Glowing Core
-    const coreGeo = new THREE.SphereGeometry(0.28, 12, 12);
+    const coreGeo = new THREE.SphereGeometry(isCrimson ? 0.35 : 0.28, 12, 12);
     const coreMat = new THREE.MeshStandardMaterial({
-      color: 0x38bdf8,
-      emissive: 0x0284c7,
-      emissiveIntensity: 1.2,
+      color,
+      emissive,
+      emissiveIntensity: isCrimson ? 1.8 : 1.2,
       roughness: 0.1,
       metalness: 0.9,
     });
@@ -149,12 +153,16 @@ export class EntityManager {
     group.add(coreMesh);
 
     // Orbiting Spark Ring
-    const ringGeo = new THREE.TorusGeometry(0.5, 0.03, 6, 16);
-    const ringMat = new THREE.MeshBasicMaterial({ color: 0x7dd3fc, transparent: true, opacity: 0.8 });
+    const ringGeo = new THREE.TorusGeometry(isCrimson ? 0.65 : 0.5, 0.04, 6, 16);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: isCrimson ? 0xf87171 : 0x7dd3fc,
+      transparent: true,
+      opacity: 0.85,
+    });
     const ringMesh = new THREE.Mesh(ringGeo, ringMat);
     group.add(ringMesh);
 
-    const light = new THREE.PointLight(0x38bdf8, 0.8, 6);
+    const light = new THREE.PointLight(color, isCrimson ? 1.2 : 0.8, 8);
     group.add(light);
 
     const baseY = groundY + 1.8;
@@ -166,8 +174,8 @@ export class EntityManager {
         // Fluttering flight pattern
         const flutter = Math.sin(totalTime * 3.0 + group.position.x) * 0.35;
         group.position.y = baseY + flutter;
-        ringMesh.rotation.x += delta * 2.0;
-        ringMesh.rotation.y += delta * 1.5;
+        ringMesh.rotation.x += delta * (isCrimson ? 3.0 : 2.0);
+        ringMesh.rotation.y += delta * (isCrimson ? 2.5 : 1.5);
       },
       dispose: () => {
         coreGeo.dispose();
@@ -181,11 +189,12 @@ export class EntityManager {
    */
   private createResourceNode(def: WorldEntityDefinition, group: THREE.Group): RuntimeEntity {
     const isMoss = def.id.includes('moss');
+    const isBloodroot = def.id.includes('bloodroot');
 
     // Base Boulder
     const rockGeo = new THREE.DodecahedronGeometry(0.55, 1);
     const rockMat = new THREE.MeshStandardMaterial({
-      color: 0x475569,
+      color: isBloodroot ? 0x27272a : 0x475569,
       roughness: 0.85,
       metalness: 0.1,
     });
@@ -193,13 +202,30 @@ export class EntityManager {
     rockMesh.position.y = 0.3;
     group.add(rockMesh);
 
-    // Flora topper (Moss cap or glowing bloom petals)
-    const floraGeo = isMoss ? new THREE.ConeGeometry(0.6, 0.4, 7) : new THREE.OctahedronGeometry(0.3, 0);
+    // Flora topper (Moss cap, glowing bloom petals, or Bloodroot Orchid)
+    let floraGeo: THREE.BufferGeometry;
+    let floraColor = 0x22c55e;
+    let floraEmissive = 0x15803d;
+
+    if (isBloodroot) {
+      floraGeo = new THREE.OctahedronGeometry(0.45, 1);
+      floraColor = 0xef4444;
+      floraEmissive = 0xb91c1c;
+    } else if (isMoss) {
+      floraGeo = new THREE.ConeGeometry(0.6, 0.4, 7);
+      floraColor = 0x22c55e;
+      floraEmissive = 0x15803d;
+    } else {
+      floraGeo = new THREE.OctahedronGeometry(0.3, 0);
+      floraColor = 0xa855f7;
+      floraEmissive = 0x7e22ce;
+    }
+
     floraGeo.translate(0, 0.65, 0);
     const floraMat = new THREE.MeshStandardMaterial({
-      color: isMoss ? 0x22c55e : 0xa855f7,
-      emissive: isMoss ? 0x15803d : 0x7e22ce,
-      emissiveIntensity: 0.4,
+      color: floraColor,
+      emissive: floraEmissive,
+      emissiveIntensity: isBloodroot ? 1.2 : 0.4,
       roughness: 0.5,
     });
     const floraMesh = new THREE.Mesh(floraGeo, floraMat);
@@ -210,7 +236,7 @@ export class EntityManager {
       group,
       update: (_delta, totalTime) => {
         if (!isMoss) {
-          floraMesh.rotation.y = totalTime * 1.2;
+          floraMesh.rotation.y = totalTime * (isBloodroot ? 1.8 : 1.2);
         }
       },
       dispose: () => {
@@ -220,9 +246,19 @@ export class EntityManager {
     };
   }
 
-  update(delta: number, totalTime: number): void {
+  update(delta: number, totalTime: number, isRedMoon = false): void {
     this.entities.forEach((entity) => {
-      entity.update?.(delta, totalTime);
+      const isRedMoonExclusive =
+        entity.def.id.includes('bloodroot') || entity.def.id.includes('crimson');
+
+      // Hide or show event exclusives based on celestial phase
+      if (isRedMoonExclusive) {
+        entity.group.visible = isRedMoon && !entity.harvested;
+      }
+
+      if (entity.group.visible) {
+        entity.update?.(delta, totalTime);
+      }
     });
   }
 

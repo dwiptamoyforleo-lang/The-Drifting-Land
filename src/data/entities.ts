@@ -68,4 +68,32 @@ export const WORLD_ENTITIES: WorldEntityDefinition[] = [
     drops: [{ itemId: 'celestial_dust', chance: 0.8, min: 1, max: 2 }],
     interactPrompt: 'Press [E] to Gather Celestial Dust',
   },
+
+  // Red Moon Exclusive Flora (Blooms only during eclipse)
+  {
+    id: 'node_bloodroot_1',
+    name: 'Bloodroot Orchid',
+    type: 'COLLECTIBLE',
+    position: [-46, 4.0, -38],
+    drops: [{ itemId: 'bloodroot_orchid', chance: 1.0, min: 1, max: 2 }],
+    interactPrompt: 'Press [E] to Harvest Bloodroot Orchid',
+  },
+  {
+    id: 'node_bloodroot_2',
+    name: 'Bloodroot Orchid',
+    type: 'COLLECTIBLE',
+    position: [-58, 4.0, -48],
+    drops: [{ itemId: 'bloodroot_orchid', chance: 1.0, min: 1, max: 3 }],
+    interactPrompt: 'Press [E] to Harvest Bloodroot Orchid',
+  },
+
+  // Red Moon Exclusive Mutated Wisp
+  {
+    id: 'critter_crimson_wisp',
+    name: 'Mutated Crimson Wisp',
+    type: 'CREATURE',
+    position: [-48, 5.0, -42],
+    drops: [{ itemId: 'blood_essence', chance: 1.0, min: 1, max: 2 }],
+    interactPrompt: 'Press [E] to Siphon Volatile Blood Essence',
+  },
 ];

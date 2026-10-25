@@ -6,13 +6,22 @@
  * - PlayerController physics & animations
  * - WorldGenerator (The Verdant Reach)
  * - EntityManager (NPCs, Wisps, Harvestable nodes)
- * - DayNightSystem & WeatherSystem
+ * - DayNightSystem (20-min cycle, 13m day / 7m night, sunrise/sunset countdown)
+ * - WeatherSystem (Clear, Mist, Wind, Rain, Storms, Dimensional Disturbance, Red Eclipse)
+ * - CrimsonWardenEncounter (Shattered Rift Boss with attack telegraphs, 2 phases, unique loot)
  * - InventorySystem, QuestSystem, CheckpointSystem
  * - InputManager and UI reactivity
  */
 
 import * as THREE from 'three';
-import { GameMode, SaveData, ShardRelic, CameraMode } from '../types/game';
+import {
+  GameMode,
+  SaveData,
+  ShardRelic,
+  CameraMode,
+  CrimsonWardenState,
+  WeatherType,
+} from '../types/game';
 import { RenderPipeline, RendererBundle } from './renderer';
 import { WorldGenerator, WorldBundle } from './world';
 import { PlayerController } from './player';
@@ -23,6 +32,7 @@ import { EntityManager, RuntimeEntity } from '../systems/entityManager';
 import { InventorySystem } from '../systems/inventorySystem';
 import { QuestSystem } from '../systems/questSystem';
 import { WeatherSystem } from '../systems/weatherSystem';
+import { CrimsonWardenEncounter } from '../systems/crimsonWarden';
 import { CheckpointSystem } from '../systems/checkpointSystem';
 import { NotificationSystem } from '../systems/notificationSystem';
 import { AudioService } from '../services/audio';
@@ -38,7 +48,15 @@ export interface EngineUiCallbacks {
     experience: number;
     experienceToNext: number;
   }) => void;
-  onTimeUpdate: (time: { phase: string; cycleTime: number; dayCount: number; isRedMoon: boolean }) => void;
+  onTimeUpdate: (time: {
+    phase: string;
+    cycleTime: number;
+    dayCount: number;
+    isRedMoon: boolean;
+    clockTime: string;
+    nextTransitionLabel: string;
+    nextTransitionSeconds: number;
+  }) => void;
   onRelicUpdate: (shards: ShardRelic[], collectedCount: number, totalCount: number) => void;
   onInteractionAvailable: (prompt: string | null) => void;
   onBeaconStateChange: (activated: boolean) => void;
@@ -48,6 +66,7 @@ export interface EngineUiCallbacks {
   onToggleMapModal?: () => void;
   onCameraModeChange?: (mode: CameraMode, label: string) => void;
   onWeatherUpdate?: (weather: string) => void;
+  onBossStateUpdate?: (boss: CrimsonWardenState | null) => void;
   onFpsUpdate?: (fps: number) => void;
 }
 
@@ -57,11 +76,12 @@ export class GameEngine {
   private world: WorldBundle | null = null;
   private player: PlayerController | null = null;
   private cameraManager: CameraManager | null = null;
-  private dayNight: DayNightSystem | null = null;
+  public dayNight: DayNightSystem | null = null;
   public entities: EntityManager | null = null;
   public inventory: InventorySystem;
   public quests: QuestSystem;
   public weather: WeatherSystem;
+  public crimsonWarden: CrimsonWardenEncounter | null = null;
   public checkpoints: CheckpointSystem;
   public input: InputManager;
   private uiCallbacks: EngineUiCallbacks;
@@ -81,6 +101,7 @@ export class GameEngine {
   private nearbyShard: ShardRelic | null = null;
   private isNearBeacon: boolean = false;
   private nearbyEntity: RuntimeEntity | null = null;
+  private isNearBoss: boolean = false;
 
   // Save state
   private activeSave: SaveData;
@@ -99,7 +120,10 @@ export class GameEngine {
       (xp) => this.addExperience(xp)
     );
 
-    this.weather = new WeatherSystem(initialSave.currentWeather || 'CLEAR');
+    this.weather = new WeatherSystem(
+      initialSave.currentWeather || 'CLEAR',
+      initialSave.settings.particleLimit || 600
+    );
 
     this.checkpoints = new CheckpointSystem(
       initialSave.activatedCheckpoints || ['cp_beacon_plaza'],
@@ -152,14 +176,59 @@ export class GameEngine {
       this.entities = new EntityManager(this.bundle.scene, this.bundle.isSoftwareGl);
       this.entities.populate(this.world.getTerrainHeight);
 
-      // 7. Initialize Day / Night system
-      this.dayNight = new DayNightSystem(this.bundle.scene, this.activeSave.worldTime.cycleTime);
-      this.dayNight.state.dayCount = this.activeSave.worldTime.dayCount;
+      // 7. Initialize Day / Night system (20-min cycle: 13m day, 7m night)
+      this.dayNight = new DayNightSystem(
+        this.bundle.scene,
+        this.activeSave.worldTime.cycleTime,
+        this.activeSave.worldTime.dayCount,
+        this.activeSave.redMoon,
+        this.activeSave.settings.dayDurationMinutes || 20
+      );
 
-      // 8. Restore collected relics state from save
+      // Hook Red Moon triggers
+      this.dayNight.onRedMoonStart = () => {
+        this.quests.startQuest('quest_blood_moon_eclipse');
+        this.weather.setWeather('RED_ECLIPSE');
+        this.cameraManager?.addShake(0.7);
+        this.persistSave();
+      };
+
+      this.dayNight.onRedMoonEnd = () => {
+        this.weather.setWeather('CLEAR');
+        this.persistSave();
+      };
+
+      // 8. Initialize Weather particles
+      this.weather.initScene(this.bundle.scene);
+
+      // 9. Initialize Crimson Warden Boss Encounter
+      this.crimsonWarden = new CrimsonWardenEncounter(
+        this.bundle.scene,
+        this.world.getTerrainHeight,
+        {
+          onBossStateChange: (bossState) => {
+            this.uiCallbacks.onBossStateUpdate?.(bossState);
+          },
+          onPlayerDamage: (damage) => {
+            if (!this.player) return;
+            this.player.stats.health = Math.max(0, this.player.stats.health - damage);
+            this.cameraManager?.addShake(0.5);
+            if (this.player.stats.health <= 0) {
+              this.handlePlayerDefeat();
+            }
+          },
+          onBossDefeated: () => {
+            this.handleBossVictory();
+          },
+        },
+        this.activeSave.redMoon.wardenDefeated,
+        this.bundle.isSoftwareGl
+      );
+
+      // 10. Restore collected relics state from save
       this.restoreRelicsState();
 
-      // 9. Initialize audio system
+      // 11. Initialize audio system
       AudioService.init();
       AudioService.setVolume(this.activeSave.settings.masterVolume);
       AudioService.setMuted(!this.activeSave.settings.soundEnabled);
@@ -176,6 +245,36 @@ export class GameEngine {
     } catch (err) {
       console.error('Game initialization failed:', err);
       throw err;
+    }
+  }
+
+  private handlePlayerDefeat(): void {
+    NotificationSystem.notify('Expedition Knockout', 'You were overwhelmed by the void rift. Returning to beacon...', 'danger', 6000);
+    if (!this.player || !this.world) return;
+
+    // Respawn at active checkpoint
+    const cp = this.checkpoints.getActiveCheckpoint();
+    const spawnPos = cp?.position || [0, 4.5, 0];
+    this.player.group.position.set(spawnPos[0], spawnPos[1], spawnPos[2]);
+    this.player.stats.health = this.player.stats.maxHealth;
+    this.player.stats.stamina = this.player.stats.maxStamina;
+  }
+
+  private handleBossVictory(): void {
+    if (!this.activeSave.redMoon.wardenRewardsClaimed) {
+      this.activeSave.redMoon.wardenRewardsClaimed = true;
+      this.activeSave.redMoon.wardenDefeated = true;
+
+      // Unique rewards (one-time claim)
+      this.inventory.addItem('crimson_heart_relic', 1, false);
+      this.inventory.addItem('wardens_blood_amulet', 1, false);
+      this.inventory.addCoins(150);
+      this.addExperience(250);
+
+      // Quest completion progress
+      this.quests.reportProgress('DEFEAT_BOSS', 'crimson_warden', 1);
+      this.cameraManager?.addShake(0.8);
+      this.persistSave();
     }
   }
 
@@ -300,24 +399,46 @@ export class GameEngine {
 
     this.totalSimulationTime += dt;
 
-    // Day/Night progression
+    // 1. Day/Night progression (20-minute cycle with exact countdown)
     this.dayNight.update(dt);
     this.uiCallbacks.onTimeUpdate({
       phase: this.dayNight.state.phaseName,
       cycleTime: this.dayNight.state.cycleTime,
       dayCount: this.dayNight.state.dayCount,
       isRedMoon: this.dayNight.state.isRedMoon,
+      clockTime: this.dayNight.state.clockTime,
+      nextTransitionLabel: this.dayNight.state.nextTransitionLabel,
+      nextTransitionSeconds: this.dayNight.state.nextTransitionSeconds,
     });
 
-    // Weather simulation
-    this.weather.update(dt, this.bundle.scene, this.dayNight.state.isRedMoon);
+    // 2. Weather simulation with particles and environmental fog
+    this.weather.update(
+      dt,
+      this.bundle.scene,
+      this.dayNight.state.isRedMoon,
+      this.player.group.position
+    );
     this.uiCallbacks.onWeatherUpdate?.(this.weather.state.currentWeather);
 
-    // World animation (beacon rings, hovering crystals)
+    // Apply weather modifiers to player stamina regeneration
+    this.player.staminaRegenModifier = this.weather.staminaRegenModifier;
+
+    // 3. World animation (beacon rings, hovering crystals, flowing river)
     this.world.update(dt);
 
-    // Entity updates (Wisps fluttering, NPC breathing)
-    this.entities?.update(dt, this.totalSimulationTime);
+    // 4. Entity updates (Wisps fluttering, NPC breathing, Red Moon orchids)
+    this.entities?.update(dt, this.totalSimulationTime, this.dayNight.state.isRedMoon);
+
+    // 5. Crimson Warden Boss simulation
+    if (this.crimsonWarden) {
+      this.crimsonWarden.update(
+        dt,
+        this.totalSimulationTime,
+        this.player.group.position,
+        this.dayNight.state.isRedMoon,
+        this.world.getTerrainHeight
+      );
+    }
 
     if (this.mode === 'TITLE') {
       // Cinematic camera orbit around The Verdant Reach & Ancient Beacon
@@ -337,6 +458,15 @@ export class GameEngine {
         { name: 'Ancient Monolith', position: new THREE.Vector3(0, this.world.getTerrainHeight(0, 0), 0), eyeHeight: 5.4 },
         { name: 'Luminescent Wisp', position: new THREE.Vector3(14, this.world.getTerrainHeight(14, -8) + 1.8, -8), eyeHeight: 0.5 },
       ];
+
+      // If boss is active, it can serve as a dramatic observer!
+      if (this.crimsonWarden?.state.active) {
+        observers.unshift({
+          name: 'Crimson Warden',
+          position: this.crimsonWarden.getBossPosition(),
+          eyeHeight: 3.8,
+        });
+      }
 
       this.cameraManager.update(
         dt,
@@ -370,7 +500,7 @@ export class GameEngine {
   }
 
   /**
-   * Check for nearby relics, beacon, entities, and checkpoints
+   * Check for nearby relics, beacon, entities, boss, and checkpoints
    */
   private checkInteractions(): void {
     if (!this.world || !this.player) return;
@@ -380,6 +510,7 @@ export class GameEngine {
     this.nearbyShard = null;
     this.isNearBeacon = false;
     this.nearbyEntity = null;
+    this.isNearBoss = false;
 
     // 1. Check Waypoint Checkpoints
     this.checkpoints.checkProximity(
@@ -392,18 +523,29 @@ export class GameEngine {
       }
     );
 
-    // 2. Check Shards
-    this.world.shards.forEach((entry) => {
-      if (entry.data.collected) return;
-      const dist = playerPos.distanceTo(entry.mesh.position);
-      if (dist < 3.2) {
-        this.nearbyShard = entry.data;
-        foundPrompt = `Press [E] or Tap to collect ${entry.data.name}`;
+    // 2. Check Crimson Warden Combat Proximity
+    if (this.crimsonWarden?.state.active) {
+      const distToBoss = playerPos.distanceTo(this.crimsonWarden.getBossPosition());
+      if (distToBoss < 6.5) {
+        this.isNearBoss = true;
+        foundPrompt = 'Press [E] or Action to Strike Crimson Warden!';
       }
-    });
+    }
 
-    // 3. Check World Entities (NPCs, resource nodes, wisps)
-    if (!this.nearbyShard && this.entities) {
+    // 3. Check Shards
+    if (!foundPrompt) {
+      this.world.shards.forEach((entry) => {
+        if (entry.data.collected) return;
+        const dist = playerPos.distanceTo(entry.mesh.position);
+        if (dist < 3.2) {
+          this.nearbyShard = entry.data;
+          foundPrompt = `Press [E] or Tap to collect ${entry.data.name}`;
+        }
+      });
+    }
+
+    // 4. Check World Entities (NPCs, resource nodes, wisps, bloodroot orchids)
+    if (!foundPrompt && this.entities) {
       const nearest = this.entities.getNearestInteractable(playerPos, 3.2);
       if (nearest) {
         this.nearbyEntity = nearest;
@@ -411,9 +553,9 @@ export class GameEngine {
       }
     }
 
-    // 4. Check Ancient Beacon
+    // 5. Check Ancient Beacon
     const beaconDist = Math.hypot(playerPos.x, playerPos.z);
-    if (!this.nearbyShard && !this.nearbyEntity && beaconDist < 6.5) {
+    if (!foundPrompt && beaconDist < 6.5) {
       this.isNearBeacon = true;
       if (!this.world.beacon.data.activated) {
         const collectedCount = this.activeSave.collectedShardIds.length;
@@ -439,7 +581,16 @@ export class GameEngine {
   public handleInteract(): void {
     if (this.mode !== 'PLAYING' || !this.world || !this.player) return;
 
-    // 1. Collect Shard
+    // 1. Attack Crimson Warden if in combat range
+    if (this.isNearBoss && this.crimsonWarden?.state.active) {
+      const struck = this.crimsonWarden.playerAttack(this.player.group.position);
+      if (struck) {
+        this.cameraManager?.addShake(0.35);
+      }
+      return;
+    }
+
+    // 2. Collect Shard
     if (this.nearbyShard && !this.nearbyShard.collected) {
       const entry = this.world.shards.get(this.nearbyShard.id);
       if (entry) {
@@ -465,7 +616,7 @@ export class GameEngine {
       return;
     }
 
-    // 2. Interact with Entity (NPC Dialogue or Harvest)
+    // 3. Interact with Entity (NPC Dialogue or Harvest)
     if (this.nearbyEntity) {
       const def = this.nearbyEntity.def;
       if (def.type === 'NPC' && def.dialogue) {
@@ -491,7 +642,7 @@ export class GameEngine {
       }
     }
 
-    // 3. Awaken Beacon
+    // 4. Awaken Beacon
     if (this.isNearBeacon && !this.world.beacon.data.activated) {
       const collectedCount = this.activeSave.collectedShardIds.length;
       if (collectedCount >= this.world.beacon.data.requiredShards) {
@@ -538,6 +689,14 @@ export class GameEngine {
           this.player.stats.stamina + itemDef.statsEffect.stamina
         );
       }
+      if (itemDef.statsEffect.maxHealthBoost) {
+        this.player.stats.maxHealth += itemDef.statsEffect.maxHealthBoost;
+        this.player.stats.health = this.player.stats.maxHealth;
+      }
+      if (itemDef.statsEffect.maxStaminaBoost) {
+        this.player.stats.maxStamina += itemDef.statsEffect.maxStaminaBoost;
+        this.player.stats.stamina = this.player.stats.maxStamina;
+      }
       AudioService.playUiClick();
       NotificationSystem.notify('Used Item', itemDef.name, 'item');
       return true;
@@ -567,6 +726,7 @@ export class GameEngine {
       cycleTime: this.dayNight.state.cycleTime,
       dayCount: this.dayNight.state.dayCount,
     };
+    this.activeSave.redMoon = { ...this.dayNight.redMoonSave };
     StorageService.saveGame(this.activeSave);
   }
 
@@ -585,9 +745,47 @@ export class GameEngine {
     return this.mode;
   }
 
-  public toggleRedMoon(): boolean {
+  // Developer-Only Testing Controls (Prompt 5 requirement)
+  public devToggleRedMoon(force?: boolean): boolean {
     if (!this.dayNight) return false;
-    return this.dayNight.toggleRedMoon();
+    const active = this.dayNight.toggleRedMoon(force);
+    if (active) {
+      this.weather.setWeather('RED_ECLIPSE');
+      this.quests.startQuest('quest_blood_moon_eclipse');
+    } else {
+      this.weather.setWeather('CLEAR');
+    }
+    this.persistSave();
+    return active;
+  }
+
+  public devJumpPhase(phase: 'DAWN' | 'NOON' | 'DUSK' | 'NIGHT'): void {
+    this.dayNight?.jumpToPhase(phase);
+  }
+
+  public devAdvanceTime(seconds: number): void {
+    this.dayNight?.advanceTimeSeconds(seconds);
+  }
+
+  public devSetWeather(weather: WeatherType): void {
+    this.weather.setWeather(weather);
+  }
+
+  public devResetRedMoonCooldown(): void {
+    this.dayNight?.resetRedMoonCooldown();
+    if (this.crimsonWarden) {
+      this.crimsonWarden.state.isDefeated = false;
+      this.activeSave.redMoon.wardenDefeated = false;
+      this.activeSave.redMoon.wardenRewardsClaimed = false;
+    }
+    this.persistSave();
+  }
+
+  public devTeleport(x: number, z: number): void {
+    if (!this.player || !this.world) return;
+    const y = this.world.getTerrainHeight(x, z) + 1.5;
+    this.player.group.position.set(x, y, z);
+    NotificationSystem.notify('Dev Teleport', `Moved to [${Math.round(x)}, ${Math.round(z)}]`, 'info');
   }
 
   public cycleCameraMode(): void {
@@ -670,6 +868,9 @@ export class GameEngine {
     AudioService.stopAmbience();
     this.player?.dispose();
     this.entities?.dispose();
+    this.crimsonWarden?.dispose();
+    this.weather?.dispose();
+    this.dayNight?.dispose();
     this.world?.dispose();
     this.bundle?.dispose();
   }

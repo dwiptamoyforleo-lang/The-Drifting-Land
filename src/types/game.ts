@@ -9,7 +9,15 @@ export type CameraMode = 'THIRD_PERSON' | 'FIRST_PERSON' | 'SECOND_PERSON';
 
 export type TimeOfDay = 'DAWN' | 'NOON' | 'DUSK' | 'NIGHT' | 'RED_MOON';
 
-export type WeatherType = 'CLEAR' | 'MIST' | 'AETHER_BREEZE' | 'POLLEN_DRIFT' | 'RED_ECLIPSE';
+export type WeatherType =
+  | 'CLEAR'
+  | 'MIST'
+  | 'WIND'
+  | 'RAIN'
+  | 'CLOUDS'
+  | 'STORMS'
+  | 'DIMENSIONAL_DISTURBANCE'
+  | 'RED_ECLIPSE';
 
 export type ItemRarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary';
 
@@ -48,6 +56,8 @@ export interface ItemDefinition {
     heal?: number;
     stamina?: number;
     speedBoostDuration?: number;
+    maxHealthBoost?: number;
+    maxStaminaBoost?: number;
   };
 }
 
@@ -120,7 +130,7 @@ export interface QuestObjective {
   targetCount: number;
   currentCount: number;
   completed: boolean;
-  type: 'COLLECT' | 'DISCOVER' | 'ACTIVATE_BEACON' | 'INTERACT_NPC';
+  type: 'COLLECT' | 'DISCOVER' | 'ACTIVATE_BEACON' | 'INTERACT_NPC' | 'DEFEAT_BOSS';
   targetId?: string;
 }
 
@@ -148,7 +158,7 @@ export interface QuestProgress {
   objectives: Record<string, number>; // objectiveId -> current count
 }
 
-export type EntityType = 'CREATURE' | 'NPC' | 'COLLECTIBLE' | 'CHECKPOINT' | 'PORTAL';
+export type EntityType = 'CREATURE' | 'NPC' | 'COLLECTIBLE' | 'CHECKPOINT' | 'PORTAL' | 'BOSS';
 
 export interface WorldEntityDefinition {
   id: string;
@@ -163,10 +173,14 @@ export interface WorldEntityDefinition {
 
 export interface WorldTimeState {
   timeScale: number; // multiplier
-  cycleTime: number; // 0.0 to 1.0 (0=dawn, 0.25=noon, 0.5=dusk, 0.75=night)
+  cycleTime: number; // 0.0 to 1.0 (0=dawn, 0.65=sunset, 1.0=dawn)
   dayCount: number;
   isRedMoon: boolean;
   phaseName: TimeOfDay;
+  clockTime: string; // e.g. "14:24"
+  nextTransitionLabel: string; // "Sunset" or "Sunrise"
+  nextTransitionSeconds: number; // accurate remaining seconds until next sunrise/sunset
+  dayDurationSeconds: number; // e.g. 1200 (20 real minutes)
 }
 
 export interface WeatherState {
@@ -174,6 +188,32 @@ export interface WeatherState {
   transitionProgress: number; // 0 to 1
   windIntensity: number;
   fogModifier: number;
+  precipitationIntensity: number; // 0 to 1
+}
+
+export interface RedMoonSaveState {
+  isActive: boolean;
+  lastEvaluatedNightDay: number; // prevents browser refresh rerolls
+  cooldownUntilDay: number;
+  wardenDefeated: boolean;
+  wardenRewardsClaimed: boolean;
+  forceTriggered?: boolean;
+}
+
+export interface CrimsonWardenState {
+  active: boolean;
+  health: number;
+  maxHealth: number;
+  phase: 1 | 2;
+  attackWarning: {
+    type: string;
+    progress: number;
+    x: number;
+    z: number;
+    radius: number;
+  } | null;
+  isDefeated: boolean;
+  defeatedMessage?: string;
 }
 
 export interface GameSettings {
@@ -187,13 +227,15 @@ export interface GameSettings {
   cameraMode: CameraMode;
   cameraSensitivity: number;
   cameraDistance: number;
+  particleLimit: number; // Low=250, Medium=600, High=1200
+  dayDurationMinutes: number; // default 20
 }
 
 export interface NotificationItem {
   id: string;
   title: string;
   message: string;
-  type: 'info' | 'quest' | 'relic' | 'item' | 'discovery';
+  type: 'info' | 'quest' | 'relic' | 'item' | 'discovery' | 'danger';
   timestamp: number;
   durationMs?: number;
 }
@@ -218,6 +260,7 @@ export interface SaveData {
     dayCount: number;
   };
   currentWeather: WeatherType;
+  redMoon: RedMoonSaveState;
   settings: GameSettings;
   discoveries: string[];
 }

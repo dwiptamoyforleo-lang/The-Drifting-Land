@@ -91,7 +91,7 @@ export class QuestSystem {
    * Process gameplay triggers (e.g. collected a shard, discovered a ruin, activated beacon)
    */
   reportProgress(
-    type: 'COLLECT' | 'DISCOVER' | 'ACTIVATE_BEACON' | 'INTERACT_NPC',
+    type: 'COLLECT' | 'DISCOVER' | 'ACTIVATE_BEACON' | 'INTERACT_NPC' | 'DEFEAT_BOSS',
     targetId?: string,
     amount: number = 1
   ): void {
