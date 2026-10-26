@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { Sparkles, Gem, Box, Compass, Info, CheckCircle2 } from 'lucide-react';
+import { Sparkles, Gem, Box, Compass, Info, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { NotificationItem } from '../types/game';
 import { NotificationSystem } from '../systems/notificationSystem';
 
@@ -48,6 +48,11 @@ export const NotificationToast: React.FC = () => {
           bgClass = 'bg-[#2e1065]/95';
           textClass = 'text-purple-300';
           Icon = Compass;
+        } else if (notif.type === 'danger') {
+          borderClass = 'border-rose-500/80';
+          bgClass = 'bg-[#29080c]/95';
+          textClass = 'text-rose-300';
+          Icon = AlertTriangle;
         }
 
         return (

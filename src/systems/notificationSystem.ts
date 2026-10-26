@@ -21,7 +21,7 @@ export class NotificationSystem {
   static notify(
     title: string,
     message: string,
-    type: 'info' | 'quest' | 'relic' | 'item' | 'discovery' = 'info',
+    type: 'info' | 'quest' | 'relic' | 'item' | 'discovery' | 'danger' = 'info',
     durationMs = 4000
   ): void {
     const item: NotificationItem = {

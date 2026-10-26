@@ -24,6 +24,7 @@ export class PlayerController {
   public velocity: THREE.Vector3 = new THREE.Vector3();
   public isGrounded: boolean = true;
   public facingAngle: number = 0;
+  public staminaRegenModifier: number = 1.0;
 
   // Jump & Dash mechanics
   private coyoteTimer: number = 0;
@@ -201,7 +202,7 @@ export class PlayerController {
 
     // Stamina regeneration when not sprinting or dashing
     if (!isSprinting && !this.isDashing && this.stats.stamina < this.stats.maxStamina) {
-      this.stats.stamina = Math.min(this.stats.maxStamina, this.stats.stamina + 26 * dt);
+      this.stats.stamina = Math.min(this.stats.maxStamina, this.stats.stamina + 26 * this.staminaRegenModifier * dt);
     }
 
     if (input.dash && this.dashCooldown <= 0 && this.stats.stamina >= 25) {

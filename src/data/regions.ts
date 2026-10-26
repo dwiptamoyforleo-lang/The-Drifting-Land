@@ -36,7 +36,7 @@ export const REGIONS: Record<string, RegionDefinition> = {
     ambientLightGround: 0x1b3826,
     sunColor: 0xfff3d6,
     spawnPoint: [0, 4.5, 0],
-    weatherProfile: ['CLEAR', 'MIST', 'AETHER_BREEZE', 'POLLEN_DRIFT'],
+    weatherProfile: ['CLEAR', 'MIST', 'WIND', 'CLOUDS'],
     discoveryLore: 'The first charted archipelago settled after the Great Drift severed the land from below.',
   },
   sunward_spire: {
@@ -51,7 +51,7 @@ export const REGIONS: Record<string, RegionDefinition> = {
     ambientLightGround: 0xb45309,
     sunColor: 0xfffbeb,
     spawnPoint: [0, 25, 0],
-    weatherProfile: ['CLEAR', 'AETHER_BREEZE'],
+    weatherProfile: ['CLEAR', 'WIND'],
     discoveryLore: 'Constructed by solar priests who sought to capture solar resonance into crystal matrices.',
   },
   abyssal_drift: {
