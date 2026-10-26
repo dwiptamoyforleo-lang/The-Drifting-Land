@@ -289,6 +289,48 @@ export const DevPanel: React.FC<DevPanelProps> = ({
             >
               <span>Promontory Tower [38, 25]</span>
             </button>
+
+            <button
+              onClick={() => onTeleport(-22, -35)}
+              className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <span>Hollow Homestead [-22, -35]</span>
+            </button>
+
+            <button
+              onClick={() => onTeleport(12, 28)}
+              className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <span>Research Camp [12, 28]</span>
+            </button>
+
+            <button
+              onClick={() => onTeleport(24, -10)}
+              className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <span>Suspension Bridge [24, -10]</span>
+            </button>
+
+            <button
+              onClick={() => onTeleport(-48, -8)}
+              className="p-2 rounded-xl bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-700/50 text-emerald-200 text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <span>Hidden Chamber [-48, -8]</span>
+            </button>
+
+            <button
+              onClick={() => onTeleport(-50, -20)}
+              className="p-2 rounded-xl bg-indigo-950/60 hover:bg-indigo-900 border border-indigo-700/50 text-indigo-200 text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <span>Dimensional Gateway [-50, -20]</span>
+            </button>
+
+            <button
+              onClick={() => onTeleport(-16, 32)}
+              className="p-2 rounded-xl bg-cyan-950/60 hover:bg-cyan-900 border border-cyan-700/50 text-cyan-200 text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <span>Lumicite Vein [-16, 32]</span>
+            </button>
           </div>
         </div>
       </div>

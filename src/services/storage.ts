@@ -77,6 +77,11 @@ export function createInitialSave(): SaveData {
     },
     settings: { ...DEFAULT_SETTINGS },
     discoveries: ['The Verdant Reach', 'Ancient Floating Spire', 'Monolith Beacon Plaza'],
+    unlockedDoors: [],
+    harvestedDeposits: {},
+    discoveredChambers: [],
+    activatedGateways: [],
+    examinedRecords: [],
   };
 }
 
@@ -277,6 +282,11 @@ export class StorageService {
       },
       settings: { ...DEFAULT_SETTINGS, ...(raw.settings || {}) },
       discoveries: Array.isArray(raw.discoveries) ? raw.discoveries : fallback.discoveries,
+      unlockedDoors: Array.isArray(raw.unlockedDoors) ? raw.unlockedDoors : [],
+      harvestedDeposits: typeof raw.harvestedDeposits === 'object' && raw.harvestedDeposits !== null ? raw.harvestedDeposits : {},
+      discoveredChambers: Array.isArray(raw.discoveredChambers) ? raw.discoveredChambers : [],
+      activatedGateways: Array.isArray(raw.activatedGateways) ? raw.activatedGateways : [],
+      examinedRecords: Array.isArray(raw.examinedRecords) ? raw.examinedRecords : [],
     };
   }
 }

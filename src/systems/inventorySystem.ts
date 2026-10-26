@@ -50,6 +50,10 @@ export class InventorySystem {
       .reduce((sum, s) => sum + s.quantity, 0);
   }
 
+  hasItem(itemId: string, minQuantity: number = 1): boolean {
+    return this.getItemCount(itemId) >= minQuantity;
+  }
+
   /**
    * Add item into inventory, respecting stack limits and vacant slots
    */

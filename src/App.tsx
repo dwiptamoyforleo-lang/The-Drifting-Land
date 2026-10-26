@@ -140,6 +140,9 @@ export default function App() {
             setCameraLabel(label);
           },
           onBossStateUpdate: (boss) => setBossState(boss),
+          onDiscoveriesUpdate: (updatedDiscoveries) => {
+            setActiveSave((prev) => ({ ...prev, discoveries: [...updatedDiscoveries] }));
+          },
         },
         currentSave
       );
@@ -417,6 +420,7 @@ export default function App() {
       {mode === 'QUESTS' && engineRef.current && (
         <QuestJournalModal
           questSystem={engineRef.current.quests}
+          discoveries={activeSave.discoveries}
           onClose={() => {
             setMode('PLAYING');
             engineRef.current?.setMode('PLAYING');

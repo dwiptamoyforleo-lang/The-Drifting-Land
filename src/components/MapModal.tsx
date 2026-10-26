@@ -121,11 +121,44 @@ export const MapModal: React.FC<MapModalProps> = ({
               </text>
             </g>
 
-            {/* 4. Whispering Waterfall (North-East) */}
-            <g transform={`translate(${mapScale(28)}, ${mapScale(-12)})`}>
-              <circle cx="0" cy="0" r="6" fill="#0891b2" stroke="#67e8f9" strokeWidth="1.5" />
-              <text x="0" y="15" textAnchor="middle" className="fill-cyan-300 text-[8px] font-mono font-bold">
-                WATERFALL
+            {/* 4. Whispering Waterfall & Suspension Bridge (North-East) */}
+            <g transform={`translate(${mapScale(24)}, ${mapScale(-10)})`}>
+              <line x1="-8" y1="-3" x2="8" y2="3" stroke="#f59e0b" strokeWidth="3" strokeLinecap="round" />
+              <text x="0" y="14" textAnchor="middle" className="fill-amber-300 text-[8px] font-mono font-bold">
+                SUSPENSION BRIDGE
+              </text>
+            </g>
+
+            {/* 5. Hollow Drift Homestead (North-West) */}
+            <g transform={`translate(${mapScale(-22)}, ${mapScale(-35)})`}>
+              <rect x="-6" y="-6" width="12" height="12" fill="#334155" stroke="#94a3b8" strokeWidth="1" rx="2" />
+              <text x="0" y="14" textAnchor="middle" className="fill-slate-300 text-[8px] font-mono font-bold">
+                HOMESTEAD
+              </text>
+            </g>
+
+            {/* 6. Surveyor Research Camp (South-East) */}
+            <g transform={`translate(${mapScale(12)}, ${mapScale(28)})`}>
+              <polygon points="0,-6 6,5 -6,5" fill="#1e3a8a" stroke="#60a5fa" strokeWidth="1" />
+              <text x="0" y="14" textAnchor="middle" className="fill-blue-300 text-[8px] font-mono font-bold">
+                RESEARCH CAMP
+              </text>
+            </g>
+
+            {/* 7. Hidden Chamber (Far West) */}
+            <g transform={`translate(${mapScale(-48)}, ${mapScale(-8)})`}>
+              <circle cx="0" cy="0" r="5" fill="#065f46" stroke="#34d399" strokeWidth="1" />
+              <text x="0" y="14" textAnchor="middle" className="fill-emerald-300 text-[8px] font-mono font-bold">
+                HIDDEN VAULT
+              </text>
+            </g>
+
+            {/* 8. Dimensional Gateway (West Ridge) */}
+            <g transform={`translate(${mapScale(-50)}, ${mapScale(-20)})`}>
+              <circle cx="0" cy="0" r="7" fill="none" stroke="#818cf8" strokeWidth="1.8" strokeDasharray="2 2" />
+              <circle cx="0" cy="0" r="3" fill="#6366f1" />
+              <text x="0" y="15" textAnchor="middle" className="fill-indigo-300 text-[8px] font-mono font-bold">
+                GATEWAY
               </text>
             </g>
 
@@ -135,7 +168,7 @@ export const MapModal: React.FC<MapModalProps> = ({
               const cy = mapScale(cp.position[2]);
               return (
                 <g key={cp.id} transform={`translate(${cx}, ${cy})`}>
-                  <circle cx="0" cy="0" r="4" fill={cp.activated ? '#10b981' : '#64748b'} />
+                  <circle cx="0" cy="0" r="5" fill={cp.activated ? '#10b981' : '#64748b'} stroke="#ffffff" strokeWidth="1" />
                 </g>
               );
             })}

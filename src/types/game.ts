@@ -240,6 +240,66 @@ export interface NotificationItem {
   durationMs?: number;
 }
 
+export type InteractableType =
+  | 'CHECKPOINT_BEACON'
+  | 'RUINED_TOWER'
+  | 'HIDDEN_CHAMBER'
+  | 'ABANDONED_SETTLEMENT'
+  | 'RESEARCH_CAMP'
+  | 'SUSPENDED_BRIDGE'
+  | 'LOCKED_DOOR'
+  | 'RESOURCE_DEPOSIT'
+  | 'DIMENSIONAL_GATEWAY'
+  | 'SHARD'
+  | 'NPC'
+  | 'CREATURE'
+  | 'BOSS';
+
+export interface InteractionPrompt {
+  id: string;
+  name: string;
+  type: InteractableType;
+  actionText: string;
+  keyHint?: string;
+  distance: number;
+}
+
+export type DiscoveryCategory =
+  | 'LOCATION'
+  | 'RUINS'
+  | 'STRUCTURE'
+  | 'FLORA'
+  | 'CREATURE'
+  | 'RECORD'
+  | 'CHAMBER'
+  | 'BEACON';
+
+export interface DiscoveryDefinition {
+  id: string;
+  name: string;
+  category: DiscoveryCategory;
+  region: string;
+  subtitle: string;
+  description: string;
+  lore: string;
+  icon: string;
+  coordinates: [number, number, number];
+  experienceReward: number;
+}
+
+export interface ObstacleCollider {
+  type: 'box' | 'cylinder';
+  x: number;
+  y: number;
+  z: number;
+  radius?: number; // for cylinder
+  height?: number;
+  width?: number; // for box
+  depth?: number; // for box
+  walkableTop?: boolean; // e.g. bridge deck or steps
+  topY?: number;
+}
+
 export interface SaveData {
   version: number;
   timestamp: number;
@@ -263,6 +323,11 @@ export interface SaveData {
   redMoon: RedMoonSaveState;
   settings: GameSettings;
   discoveries: string[];
+  unlockedDoors: string[];
+  harvestedDeposits: Record<string, number>;
+  discoveredChambers: string[];
+  activatedGateways: string[];
+  examinedRecords: string[];
 }
 
 export interface InputState {

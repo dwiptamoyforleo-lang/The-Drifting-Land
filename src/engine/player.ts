@@ -9,7 +9,7 @@
  */
 
 import * as THREE from 'three';
-import { InputState, PlayerStats } from '../types/game';
+import { InputState, PlayerStats, ObstacleCollider } from '../types/game';
 import { AudioService } from '../services/audio';
 
 // Pre-allocated reusable math vectors (Zero GC in render loop)
@@ -177,7 +177,10 @@ export class PlayerController {
     delta: number,
     input: InputState,
     getTerrainHeight: (x: number, z: number) => number,
-    camera: THREE.PerspectiveCamera
+    camera: THREE.PerspectiveCamera,
+    colliders: ObstacleCollider[] = [],
+    activeCheckpointPos?: [number, number, number],
+    onAbyssFall?: () => void
   ): void {
     const dt = Math.min(delta, 0.05); // clamped delta
 
@@ -290,18 +293,81 @@ export class PlayerController {
       this.bodyMesh.rotation.z = THREE.MathUtils.damp(this.bodyMesh.rotation.z, 0, 10, dt);
     }
 
-    // 4. Gravity and Vertical Movement
-    const currentGroundY = getTerrainHeight(this.group.position.x, this.group.position.z);
-    const gravity = -24;
+    // 4. Gravity, Walkable Surfaces and Obstacle Collision
+    const terrainGroundY = getTerrainHeight(this.group.position.x, this.group.position.z);
+    let effectiveGroundY = terrainGroundY;
 
+    // Check walkable elevated surfaces (bridge deck, tower steps)
+    for (const c of colliders) {
+      if (c.walkableTop && c.topY !== undefined) {
+        if (c.type === 'box' && c.width && c.depth) {
+          const halfW = c.width / 2;
+          const halfD = c.depth / 2;
+          if (
+            this.group.position.x >= c.x - halfW &&
+            this.group.position.x <= c.x + halfW &&
+            this.group.position.z >= c.z - halfD &&
+            this.group.position.z <= c.z + halfD
+          ) {
+            if (this.group.position.y >= c.topY - 0.7 && this.group.position.y <= c.topY + 1.8) {
+              effectiveGroundY = Math.max(effectiveGroundY, c.topY);
+            }
+          }
+        } else if (c.type === 'cylinder' && c.radius) {
+          const dist = Math.hypot(this.group.position.x - c.x, this.group.position.z - c.z);
+          if (dist <= c.radius) {
+            if (this.group.position.y >= c.topY - 0.7 && this.group.position.y <= c.topY + 1.8) {
+              effectiveGroundY = Math.max(effectiveGroundY, c.topY);
+            }
+          }
+        }
+      }
+    }
+
+    const gravity = -24;
     this.velocity.y += gravity * dt;
     this.group.position.x += this.velocity.x * dt;
     this.group.position.z += this.velocity.z * dt;
     this.group.position.y += this.velocity.y * dt;
 
+    // Solid obstacle collision resolution (push player away from walls, pillars, closed gates)
+    const playerRadius = 0.45;
+    for (const c of colliders) {
+      if (c.walkableTop) continue; // walkable surfaces don't block horizontal movement
+      if (c.type === 'cylinder' && c.radius) {
+        const dx = this.group.position.x - c.x;
+        const dz = this.group.position.z - c.z;
+        const dist = Math.hypot(dx, dz);
+        const minDist = c.radius + playerRadius;
+        if (dist < minDist && dist > 0.001) {
+          const overlap = minDist - dist;
+          this.group.position.x += (dx / dist) * overlap;
+          this.group.position.z += (dz / dist) * overlap;
+        }
+      } else if (c.type === 'box' && c.width && c.depth) {
+        const halfW = c.width / 2;
+        const halfD = c.depth / 2;
+        const closestX = Math.max(c.x - halfW, Math.min(this.group.position.x, c.x + halfW));
+        const closestZ = Math.max(c.z - halfD, Math.min(this.group.position.z, c.z + halfD));
+        const dx = this.group.position.x - closestX;
+        const dz = this.group.position.z - closestZ;
+        const dist = Math.hypot(dx, dz);
+        if (dist < playerRadius) {
+          if (dist > 0.001) {
+            const overlap = playerRadius - dist;
+            this.group.position.x += (dx / dist) * overlap;
+            this.group.position.z += (dz / dist) * overlap;
+          } else {
+            const pushX = this.group.position.x > c.x ? halfW + playerRadius : -(halfW + playerRadius);
+            this.group.position.x = c.x + pushX;
+          }
+        }
+      }
+    }
+
     // Ground collision test
-    if (this.group.position.y <= currentGroundY) {
-      this.group.position.y = currentGroundY;
+    if (this.group.position.y <= effectiveGroundY) {
+      this.group.position.y = effectiveGroundY;
       this.velocity.y = 0;
       this.isGrounded = true;
       this.coyoteTimer = 0.12; // 120ms coyote time
@@ -318,10 +384,17 @@ export class PlayerController {
       AudioService.playJump();
     }
 
-    // Fall rescue safety: if player drops off floating archipelago into abyss, safely respawn at center
+    // Fall rescue safety: return player to active checkpoint after falling into abyss
     if (this.group.position.y < -30) {
-      this.group.position.set(0, getTerrainHeight(0, 0) + 2, 0);
-      this.velocity.set(0, 0, 0);
+      if (onAbyssFall) {
+        onAbyssFall();
+      } else if (activeCheckpointPos) {
+        this.group.position.set(activeCheckpointPos[0], activeCheckpointPos[1] + 1.0, activeCheckpointPos[2]);
+        this.velocity.set(0, 0, 0);
+      } else {
+        this.group.position.set(0, getTerrainHeight(0, 0) + 2, 0);
+        this.velocity.set(0, 0, 0);
+      }
     }
 
     // 6. Camera Orbit & Look Delta Updates

@@ -37,6 +37,8 @@ import { CheckpointSystem } from '../systems/checkpointSystem';
 import { NotificationSystem } from '../systems/notificationSystem';
 import { AudioService } from '../services/audio';
 import { StorageService } from '../services/storage';
+import { StructuresManager } from './structures';
+import { InteractionSystem } from '../systems/interactionSystem';
 
 export interface EngineUiCallbacks {
   onStatsUpdate: (stats: {
@@ -68,6 +70,7 @@ export interface EngineUiCallbacks {
   onWeatherUpdate?: (weather: string) => void;
   onBossStateUpdate?: (boss: CrimsonWardenState | null) => void;
   onFpsUpdate?: (fps: number) => void;
+  onDiscoveriesUpdate?: (discoveries: string[]) => void;
 }
 
 export class GameEngine {
@@ -78,6 +81,8 @@ export class GameEngine {
   private cameraManager: CameraManager | null = null;
   public dayNight: DayNightSystem | null = null;
   public entities: EntityManager | null = null;
+  public structures: StructuresManager | null = null;
+  public interactions: InteractionSystem | null = null;
   public inventory: InventorySystem;
   public quests: QuestSystem;
   public weather: WeatherSystem;
@@ -175,6 +180,36 @@ export class GameEngine {
       // 6. Build World Entities (NPCs, Wisps, Harvestable nodes)
       this.entities = new EntityManager(this.bundle.scene, this.bundle.isSoftwareGl);
       this.entities.populate(this.world.getTerrainHeight);
+
+      // 6B. Build World Structures (Beacons, Ruined Towers, Hidden Chambers, Settlements, Camps, Bridges, Gates, Deposits)
+      this.structures = new StructuresManager(this.bundle.scene, this.bundle.isSoftwareGl);
+      this.structures.buildAll(this.world.getTerrainHeight, this.activeSave);
+
+      // 6C. Build Unified Interaction System
+      this.interactions = new InteractionSystem(
+        this.activeSave,
+        this.inventory,
+        this.quests,
+        this.checkpoints,
+        this.structures
+      );
+      this.interactions.onPromptChange = (prompt) => {
+        this.currentInteractionPrompt = prompt;
+        this.uiCallbacks.onInteractionAvailable(prompt);
+      };
+      this.interactions.onCameraShake = (intensity) => {
+        this.cameraManager?.addShake(intensity);
+      };
+      this.interactions.onSaveRequested = () => {
+        this.persistSave();
+        this.uiCallbacks.onDiscoveriesUpdate?.(this.activeSave.discoveries);
+      };
+      this.interactions.onTeleportRequested = (x, y, z) => {
+        if (this.player) {
+          this.player.group.position.set(x, y, z);
+          this.player.velocity.set(0, 0, 0);
+        }
+      };
 
       // 7. Initialize Day / Night system (20-min cycle: 13m day, 7m night)
       this.dayNight = new DayNightSystem(
@@ -426,6 +461,9 @@ export class GameEngine {
     // 3. World animation (beacon rings, hovering crystals, flowing river)
     this.world.update(dt);
 
+    // 3B. Structures animation (astrolabe rings, gates, crystals, dimensional gateway vortex)
+    this.structures?.update(dt, this.totalSimulationTime);
+
     // 4. Entity updates (Wisps fluttering, NPC breathing, Red Moon orchids)
     this.entities?.update(dt, this.totalSimulationTime, this.dayNight.state.isRedMoon);
 
@@ -449,8 +487,19 @@ export class GameEngine {
       this.bundle.camera.position.y = 16 + Math.sin(t * 1.5) * 4;
       this.bundle.camera.lookAt(0, 5, 0);
     } else if (this.mode === 'PLAYING') {
-      // 1. Player physics & movement
-      this.player.update(dt, this.input.state, this.world.getTerrainHeight, this.bundle.camera);
+      // 1. Player physics, colliders & movement
+      const activeCp = this.checkpoints.getActiveCheckpoint();
+      const colliders = this.structures ? this.structures.colliders : [];
+
+      this.player.update(
+        dt,
+        this.input.state,
+        this.world.getTerrainHeight,
+        this.bundle.camera,
+        colliders,
+        activeCp?.position,
+        () => this.handlePlayerDefeat()
+      );
 
       // 2. Camera Manager update with Observer Perspective support
       const observers: ObserverTarget[] = [
@@ -512,7 +561,15 @@ export class GameEngine {
     this.nearbyEntity = null;
     this.isNearBoss = false;
 
-    // 1. Check Waypoint Checkpoints
+    // 1. Check Unified Structure Interactions (Beacons, Ruined Towers, Chambers, Settlements, Camps, Gates, Deposits, Gateways)
+    if (this.interactions) {
+      const structPrompt = this.interactions.update(playerPos);
+      if (structPrompt) {
+        foundPrompt = structPrompt.actionText;
+      }
+    }
+
+    // 2. Check Waypoint Checkpoints
     this.checkpoints.checkProximity(
       [playerPos.x, playerPos.y, playerPos.z],
       (discoveredId) => {
@@ -523,8 +580,8 @@ export class GameEngine {
       }
     );
 
-    // 2. Check Crimson Warden Combat Proximity
-    if (this.crimsonWarden?.state.active) {
+    // 3. Check Crimson Warden Combat Proximity
+    if (!foundPrompt && this.crimsonWarden?.state.active) {
       const distToBoss = playerPos.distanceTo(this.crimsonWarden.getBossPosition());
       if (distToBoss < 6.5) {
         this.isNearBoss = true;
@@ -532,7 +589,7 @@ export class GameEngine {
       }
     }
 
-    // 3. Check Shards
+    // 4. Check Shards
     if (!foundPrompt) {
       this.world.shards.forEach((entry) => {
         if (entry.data.collected) return;
@@ -544,7 +601,7 @@ export class GameEngine {
       });
     }
 
-    // 4. Check World Entities (NPCs, resource nodes, wisps, bloodroot orchids)
+    // 5. Check World Entities (NPCs, resource nodes, wisps, bloodroot orchids)
     if (!foundPrompt && this.entities) {
       const nearest = this.entities.getNearestInteractable(playerPos, 3.2);
       if (nearest) {
@@ -553,7 +610,7 @@ export class GameEngine {
       }
     }
 
-    // 5. Check Ancient Beacon
+    // 6. Check Ancient Beacon
     const beaconDist = Math.hypot(playerPos.x, playerPos.z);
     if (!foundPrompt && beaconDist < 6.5) {
       this.isNearBeacon = true;
@@ -581,7 +638,12 @@ export class GameEngine {
   public handleInteract(): void {
     if (this.mode !== 'PLAYING' || !this.world || !this.player) return;
 
-    // 1. Attack Crimson Warden if in combat range
+    // 1. Structure interaction via InteractionSystem
+    if (this.interactions && this.interactions.executeInteraction()) {
+      return;
+    }
+
+    // 2. Attack Crimson Warden if in combat range
     if (this.isNearBoss && this.crimsonWarden?.state.active) {
       const struck = this.crimsonWarden.playerAttack(this.player.group.position);
       if (struck) {
@@ -868,6 +930,7 @@ export class GameEngine {
     AudioService.stopAmbience();
     this.player?.dispose();
     this.entities?.dispose();
+    this.structures?.dispose();
     this.crimsonWarden?.dispose();
     this.weather?.dispose();
     this.dayNight?.dispose();

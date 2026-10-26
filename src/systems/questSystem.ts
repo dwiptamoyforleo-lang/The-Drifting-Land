@@ -29,9 +29,12 @@ export class QuestSystem {
     this.onExperienceAwarded = onExperienceAwarded;
     this.progress = { ...initialProgress };
 
-    // Initialize default starter quest if none exist
+    // Initialize default starter quests if none exist
     if (!this.progress['quest_awaken_beacon']) {
       this.startQuest('quest_awaken_beacon');
+    }
+    if (!this.progress['quest_lost_civilization']) {
+      this.startQuest('quest_lost_civilization');
     }
   }
 

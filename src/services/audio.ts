@@ -284,4 +284,146 @@ export class AudioService {
       osc.stop(now + 0.05);
     } catch {}
   }
+
+  /**
+   * Sound effect: Door / Gate Unlocked (mechanical stone slide & resonance)
+   */
+  static playDoorUnlock(): void {
+    if (!this.ctx || !this.masterGain || this.isMuted) return;
+    try {
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(220, now);
+      osc.frequency.linearRampToValueAtTime(440, now + 0.3);
+      osc.frequency.exponentialRampToValueAtTime(110, now + 0.7);
+
+      gain.gain.setValueAtTime(0.25, now);
+      gain.gain.linearRampToValueAtTime(0.3, now + 0.2);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.75);
+
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+
+      osc.start(now);
+      osc.stop(now + 0.8);
+    } catch {}
+  }
+
+  /**
+   * Sound effect: Door Locked (dull thud rejection feedback)
+   */
+  static playDoorLocked(): void {
+    if (!this.ctx || !this.masterGain || this.isMuted) return;
+    try {
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(140, now);
+      osc.frequency.exponentialRampToValueAtTime(60, now + 0.15);
+
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+
+      osc.start(now);
+      osc.stop(now + 0.2);
+    } catch {}
+  }
+
+  /**
+   * Sound effect: Mining / Crystal strike (metallic resonance with crystal chime)
+   */
+  static playMiningHit(): void {
+    if (!this.ctx || !this.masterGain || this.isMuted) return;
+    try {
+      const now = this.ctx.currentTime;
+      // Strike body
+      const osc1 = this.ctx.createOscillator();
+      const gain1 = this.ctx.createGain();
+      osc1.type = 'triangle';
+      osc1.frequency.setValueAtTime(580 + Math.random() * 80, now);
+      osc1.frequency.exponentialRampToValueAtTime(220, now + 0.12);
+      gain1.gain.setValueAtTime(0.25, now);
+      gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+      osc1.connect(gain1);
+      gain1.connect(this.masterGain);
+      osc1.start(now);
+      osc1.stop(now + 0.16);
+
+      // Crystal chime overtone
+      const osc2 = this.ctx.createOscillator();
+      const gain2 = this.ctx.createGain();
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(1760 + Math.random() * 200, now);
+      gain2.gain.setValueAtTime(0.18, now);
+      gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+      osc2.connect(gain2);
+      gain2.connect(this.masterGain);
+      osc2.start(now);
+      osc2.stop(now + 0.42);
+    } catch {}
+  }
+
+  /**
+   * Sound effect: Discovery Fanfare (Triumphant celestial 3-chord arpeggio)
+   */
+  static playDiscoveryFanfare(): void {
+    if (!this.ctx || !this.masterGain || this.isMuted) return;
+    try {
+      const now = this.ctx.currentTime;
+      const notes = [440, 554.37, 659.25, 880]; // A major arpeggio
+      notes.forEach((freq, idx) => {
+        if (!this.ctx || !this.masterGain) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        const startTime = now + idx * 0.11;
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, startTime);
+
+        gain.gain.setValueAtTime(0.22, startTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.85);
+
+        osc.connect(gain);
+        gain.connect(this.masterGain);
+
+        osc.start(startTime);
+        osc.stop(startTime + 0.9);
+      });
+    } catch {}
+  }
+
+  /**
+   * Sound effect: Dimensional Gateway Warp (Atmospheric swirling vortex)
+   */
+  static playGatewayTeleport(): void {
+    if (!this.ctx || !this.masterGain || this.isMuted) return;
+    try {
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(180, now);
+      osc.frequency.exponentialRampToValueAtTime(720, now + 0.4);
+      osc.frequency.exponentialRampToValueAtTime(240, now + 0.9);
+
+      gain.gain.setValueAtTime(0.01, now);
+      gain.gain.linearRampToValueAtTime(0.35, now + 0.3);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 1.1);
+
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+
+      osc.start(now);
+      osc.stop(now + 1.2);
+    } catch {}
+  }
 }
