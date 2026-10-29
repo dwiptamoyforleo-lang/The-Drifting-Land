@@ -520,42 +520,86 @@ export class StructuresManager {
     grp.position.set(x, y, z);
 
     // Weathered Flagstone courtyard
-    const courtGeo = new THREE.CylinderGeometry(7.5, 8.0, 0.25, 8);
+    const courtGeo = new THREE.CylinderGeometry(8.5, 9.0, 0.25, 8);
     const courtMat = new THREE.MeshStandardMaterial({ map: pathTex, roughness: 0.9 });
     const court = new THREE.Mesh(courtGeo, courtMat);
     court.position.y = 0.12;
     grp.add(court);
 
-    // Shelter 1 (Main homestead hut)
+    // Shelter 1 (Elder Soren's Longhouse / Settlement Lodge)
     const hut1 = new THREE.Group();
     hut1.position.set(-3.5, 0, -2);
-    // Timber walls
-    const wall1 = new THREE.Mesh(new THREE.BoxGeometry(4.2, 2.8, 3.6), woodMat);
-    wall1.position.y = 1.4;
+    const wall1 = new THREE.Mesh(new THREE.BoxGeometry(4.6, 3.0, 4.0), woodMat);
+    wall1.position.y = 1.5;
     wall1.castShadow = !this.isSoftwareGl;
     hut1.add(wall1);
-    // Slanted thatch/wood roof
-    const roof1 = new THREE.Mesh(new THREE.ConeGeometry(3.6, 1.8, 4), woodMat);
-    roof1.position.y = 3.6;
+    const roof1 = new THREE.Mesh(new THREE.ConeGeometry(4.0, 2.0, 4), woodMat);
+    roof1.position.y = 4.0;
     roof1.rotation.y = Math.PI / 4;
     roof1.castShadow = !this.isSoftwareGl;
     hut1.add(roof1);
     grp.add(hut1);
 
-    // Shelter 2 (Broken storehouse)
-    const hut2 = new THREE.Group();
-    hut2.position.set(3.8, 0, 2.5);
-    const wall2 = new THREE.Mesh(new THREE.BoxGeometry(3.2, 2.2, 3.2), woodMat);
-    wall2.position.y = 1.1;
-    wall2.castShadow = !this.isSoftwareGl;
-    hut2.add(wall2);
-    grp.add(hut2);
+    // Shelter 2 (Trader Orin's Outpost Stall with Canvas Awning)
+    const stall = new THREE.Group();
+    stall.position.set(3.8, 0, 2.5);
+    const stallWall = new THREE.Mesh(new THREE.BoxGeometry(3.4, 2.4, 3.2), woodMat);
+    stallWall.position.y = 1.2;
+    stallWall.castShadow = !this.isSoftwareGl;
+    stall.add(stallWall);
+    // Merchant display counter
+    const counterGeo = new THREE.BoxGeometry(2.2, 0.85, 0.6);
+    const counter = new THREE.Mesh(counterGeo, woodMat);
+    counter.position.set(-0.6, 0.42, 1.8);
+    stall.add(counter);
+    // Striped/dyed awning
+    const awningMat = new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.8 });
+    const awning = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.1, 1.4), awningMat);
+    awning.position.set(-0.6, 2.0, 2.0);
+    awning.rotation.x = 0.2;
+    stall.add(awning);
+    grp.add(stall);
 
-    // Stone Hearth in center with old ashes
-    const hearthGeo = new THREE.CylinderGeometry(1.2, 1.4, 0.8, 8);
+    // Warm Central Hearth with Animated Campfire
+    const hearthGeo = new THREE.CylinderGeometry(1.4, 1.6, 0.5, 8);
     const hearth = new THREE.Mesh(hearthGeo, stoneMat);
-    hearth.position.set(0, 0.4, 0);
+    hearth.position.set(0, 0.25, 0);
     grp.add(hearth);
+
+    // Fire logs & glowing embers
+    const logMat = new THREE.MeshStandardMaterial({ color: 0x3e2723, roughness: 0.9 });
+    for (let i = 0; i < 4; i++) {
+      const fireLog = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.9, 5), logMat);
+      fireLog.rotation.z = Math.PI / 3;
+      fireLog.rotation.y = (i * Math.PI) / 2;
+      fireLog.position.set(0, 0.35, 0);
+      grp.add(fireLog);
+    }
+
+    const flameMat = new THREE.MeshStandardMaterial({
+      color: 0xffedd5,
+      emissive: 0xf97316,
+      emissiveIntensity: 1.2,
+      roughness: 0.3,
+    });
+    const flameMesh = new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.7, 6), flameMat);
+    flameMesh.position.set(0, 0.7, 0);
+    grp.add(flameMesh);
+
+    const hearthLight = new THREE.PointLight(0xf97316, 1.8, 14);
+    hearthLight.position.set(0, 1.2, 0);
+    grp.add(hearthLight);
+
+    // Campfire seating benches
+    const benchGeo = new THREE.BoxGeometry(1.6, 0.35, 0.45);
+    const bench1 = new THREE.Mesh(benchGeo, woodMat);
+    bench1.position.set(0, 0.18, 1.8);
+    grp.add(bench1);
+
+    const bench2 = new THREE.Mesh(benchGeo, woodMat);
+    bench2.position.set(1.8, 0.18, 0);
+    bench2.rotation.y = Math.PI / 2;
+    grp.add(bench2);
 
     // Pioneer Ledger on a wood crate beside hearth
     const crateGeo = new THREE.BoxGeometry(0.8, 0.8, 0.8);
@@ -568,26 +612,30 @@ export class StructuresManager {
     ledger.position.set(1.5, 0.85, -0.6);
     grp.add(ledger);
 
-    // Salvage supply crate on the side
-    const salvageCrate = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.9, 1.0), woodMat);
-    salvageCrate.position.set(-1.8, 0.45, 2.8);
-    grp.add(salvageCrate);
+    // Mira's Garden Planter Boxes
+    const gardenBox = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.4, 1.2), woodMat);
+    gardenBox.position.set(-5.5, 0.2, 1.5);
+    grp.add(gardenBox);
+    const gardenFlora = new THREE.Mesh(
+      new THREE.DodecahedronGeometry(0.5, 0),
+      new THREE.MeshStandardMaterial({ color: 0x22c55e, roughness: 0.8 })
+    );
+    gardenFlora.position.set(-5.5, 0.6, 1.5);
+    grp.add(gardenFlora);
 
-    // Broken grounded cargo skiff frame
-    const skiffGeo = new THREE.CylinderGeometry(0.6, 1.2, 5.0, 6);
-    skiffGeo.rotateZ(Math.PI / 2);
-    skiffGeo.scale(1, 0.6, 1);
-    const skiff = new THREE.Mesh(skiffGeo, woodMat);
-    skiff.position.set(4.2, 0.4, -3.2);
-    skiff.rotation.y = Math.PI / 6;
-    grp.add(skiff);
+    // Elian's Masonry Anvil & Cut Stones
+    const anvilMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.8, roughness: 0.3 });
+    const anvil = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.6, 0.7), anvilMat);
+    anvil.position.set(2.2, 0.3, -2.8);
+    grp.add(anvil);
 
     // Colliders
     const colliders: ObstacleCollider[] = [
-      { type: 'box', x: x - 3.5, y: y + 1.4, z: z - 2, width: 4.2, depth: 3.6, height: 3.5 },
-      { type: 'box', x: x + 3.8, y: y + 1.1, z: z + 2.5, width: 3.2, depth: 3.2, height: 2.8 },
-      { type: 'cylinder', x, y: y + 0.4, z, radius: 1.3, height: 0.8 },
-      { type: 'box', x: x - 1.8, y: y + 0.45, z: z + 2.8, width: 1.0, depth: 1.0, height: 0.9 },
+      { type: 'box', x: x - 3.5, y: y + 1.5, z: z - 2, width: 4.6, depth: 4.0, height: 3.5 },
+      { type: 'box', x: x + 3.8, y: y + 1.2, z: z + 2.5, width: 3.4, depth: 3.2, height: 3.0 },
+      { type: 'cylinder', x, y: y + 0.3, z, radius: 1.5, height: 0.8 },
+      { type: 'box', x: x + 1.5, y: y + 0.4, z: z - 0.6, width: 0.8, depth: 0.8, height: 0.8 },
+      { type: 'box', x: x - 5.5, y: y + 0.3, z: z + 1.5, width: 2.4, depth: 1.2, height: 0.6 },
     ];
 
     this.colliders.push(...colliders);
@@ -595,13 +643,19 @@ export class StructuresManager {
 
     this.structures.set('abandoned_settlement', {
       id: 'abandoned_settlement',
-      name: 'Hollow Drift Homestead',
+      name: 'Verdant Haven Settlement',
       type: 'ABANDONED_SETTLEMENT',
       position: [x + 1.5, y + 0.85, z - 0.6],
       interactionRadius: 3.8,
       promptText: 'Press [E] or Action to Read Pioneer Homestead Ledger',
       group: grp,
       colliders,
+      update: (_dt, totalTime) => {
+        // Campfire flicker
+        const flicker = Math.sin(totalTime * 8) * 0.15 + Math.cos(totalTime * 14) * 0.1;
+        hearthLight.intensity = 1.8 + flicker;
+        flameMesh.scale.set(1.0 + flicker * 0.2, 1.0 + Math.sin(totalTime * 12) * 0.25, 1.0 + flicker * 0.2);
+      },
       dispose: () => {},
     });
   }

@@ -459,8 +459,23 @@ export class InteractionSystem {
       NotificationSystem.notify(`Discovered: ${def.name}`, def.subtitle, 'discovery', 5000);
     }
 
-    // Quest progress
+    // Quest & Exploration progression triggers
     this.quests.reportProgress('DISCOVER', discoveryId, 1);
+    this.quests.addExplorationXp(def?.experienceReward || 50);
+
+    if (discoveryId.includes('chamber')) {
+      this.quests.reportProgress('ENTER_CHAMBER', discoveryId, 1);
+    }
+    if (discoveryId.includes('record') || discoveryId.includes('ledger') || discoveryId.includes('cataclysm')) {
+      this.quests.reportProgress('READ_RECORD', discoveryId, 1);
+    }
+    if (discoveryId.includes('gateway') || discoveryId.includes('portal')) {
+      this.quests.reportProgress('DISCOVER_PORTAL', discoveryId, 1);
+    }
+    if (discoveryId.includes('rift') || discoveryId.includes('disturbance')) {
+      this.quests.reportProgress('LOCATE_DISTURBANCE', discoveryId, 1);
+    }
+
     this.onSaveRequested?.();
   }
 }

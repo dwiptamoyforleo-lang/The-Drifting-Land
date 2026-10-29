@@ -25,6 +25,7 @@ export class PlayerController {
   public isGrounded: boolean = true;
   public facingAngle: number = 0;
   public staminaRegenModifier: number = 1.0;
+  public sprintDrainModifier: number = 1.0;
 
   // Jump & Dash mechanics
   private coyoteTimer: number = 0;
@@ -200,7 +201,7 @@ export class PlayerController {
 
     if (input.sprint && hasMoveInput && this.stats.stamina > 4) {
       isSprinting = true;
-      this.stats.stamina = Math.max(0, this.stats.stamina - 18 * dt);
+      this.stats.stamina = Math.max(0, this.stats.stamina - 18 * this.sprintDrainModifier * dt);
     }
 
     // Stamina regeneration when not sprinting or dashing

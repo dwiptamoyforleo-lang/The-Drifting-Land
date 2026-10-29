@@ -38,7 +38,8 @@ export const DEFAULT_STATS: PlayerStats = {
 };
 
 export const DEFAULT_WALLET: PlayerWallet = {
-  sunstoneCoins: 60,
+  driftCoins: 75,
+  sunstoneCoins: 75,
   aetherEssence: 0,
 };
 
@@ -54,7 +55,8 @@ export function createInitialSave(): SaveData {
     playerStats: { ...DEFAULT_STATS },
     wallet: { ...DEFAULT_WALLET },
     inventory: [
-      { itemId: 'traveler_rations', quantity: 2 },
+      { itemId: 'traveler_rations', quantity: 3 },
+      { itemId: 'drift_bread', quantity: 2 },
       { itemId: 'drift_bloom_nectar', quantity: 1 },
     ],
     quests: {},
@@ -82,6 +84,19 @@ export function createInitialSave(): SaveData {
     discoveredChambers: [],
     activatedGateways: [],
     examinedRecords: [],
+    harvestedFlora: {},
+    hotbarSlots: [null, null, null, null, null, null],
+    equippedGear: { head: null, body: null, tool: null, accessory: null },
+    trackedQuestId: 'quest_main_1_clearing',
+    explorationRank: 1,
+    explorationXp: 0,
+    achievements: {},
+    claimedQuestRewards: [],
+    discoveredNpcs: ['npc_elder_soren'],
+    settlementProgress: {
+      hearthRekindled: true,
+      spokeWithElder: false,
+    },
   };
 }
 
@@ -247,8 +262,15 @@ export class StorageService {
       experienceToNext: Number.isFinite(raw.playerStats?.experienceToNext) ? raw.playerStats.experienceToNext : fallback.playerStats.experienceToNext,
     };
 
+    const coinVal = Number.isFinite(raw.wallet?.driftCoins)
+      ? raw.wallet.driftCoins
+      : Number.isFinite(raw.wallet?.sunstoneCoins)
+      ? raw.wallet.sunstoneCoins
+      : fallback.wallet.driftCoins;
+
     const wallet: PlayerWallet = {
-      sunstoneCoins: Number.isFinite(raw.wallet?.sunstoneCoins) ? raw.wallet.sunstoneCoins : fallback.wallet.sunstoneCoins,
+      driftCoins: coinVal,
+      sunstoneCoins: coinVal,
       aetherEssence: Number.isFinite(raw.wallet?.aetherEssence) ? raw.wallet.aetherEssence : fallback.wallet.aetherEssence,
     };
 
@@ -284,9 +306,19 @@ export class StorageService {
       discoveries: Array.isArray(raw.discoveries) ? raw.discoveries : fallback.discoveries,
       unlockedDoors: Array.isArray(raw.unlockedDoors) ? raw.unlockedDoors : [],
       harvestedDeposits: typeof raw.harvestedDeposits === 'object' && raw.harvestedDeposits !== null ? raw.harvestedDeposits : {},
+      harvestedFlora: typeof raw.harvestedFlora === 'object' && raw.harvestedFlora !== null ? raw.harvestedFlora : {},
       discoveredChambers: Array.isArray(raw.discoveredChambers) ? raw.discoveredChambers : [],
       activatedGateways: Array.isArray(raw.activatedGateways) ? raw.activatedGateways : [],
       examinedRecords: Array.isArray(raw.examinedRecords) ? raw.examinedRecords : [],
+      hotbarSlots: Array.isArray(raw.hotbarSlots) ? raw.hotbarSlots : fallback.hotbarSlots,
+      equippedGear: typeof raw.equippedGear === 'object' && raw.equippedGear !== null ? raw.equippedGear : fallback.equippedGear,
+      trackedQuestId: typeof raw.trackedQuestId === 'string' || raw.trackedQuestId === null ? raw.trackedQuestId : 'quest_main_1_clearing',
+      explorationRank: Number.isFinite(raw.explorationRank) ? Math.max(1, Math.min(5, Math.floor(raw.explorationRank))) : 1,
+      explorationXp: Number.isFinite(raw.explorationXp) ? Math.max(0, Math.floor(raw.explorationXp)) : 0,
+      achievements: typeof raw.achievements === 'object' && raw.achievements !== null ? raw.achievements : {},
+      claimedQuestRewards: Array.isArray(raw.claimedQuestRewards) ? raw.claimedQuestRewards : [],
+      discoveredNpcs: Array.isArray(raw.discoveredNpcs) ? raw.discoveredNpcs : fallback.discoveredNpcs,
+      settlementProgress: typeof raw.settlementProgress === 'object' && raw.settlementProgress !== null ? raw.settlementProgress : fallback.settlementProgress,
     };
   }
 }

@@ -3,7 +3,7 @@
  * Comprehensive data contracts for all gameplay, progression, rendering, and persistence systems.
  */
 
-export type GameMode = 'TITLE' | 'PLAYING' | 'PAUSED' | 'SETTINGS' | 'INVENTORY' | 'QUESTS' | 'MAP' | 'ERROR';
+export type GameMode = 'TITLE' | 'PLAYING' | 'PAUSED' | 'SETTINGS' | 'INVENTORY' | 'QUESTS' | 'MAP' | 'TRADE' | 'ERROR';
 
 export type CameraMode = 'THIRD_PERSON' | 'FIRST_PERSON' | 'SECOND_PERSON';
 
@@ -21,7 +21,47 @@ export type WeatherType =
 
 export type ItemRarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary';
 
-export type ItemCategory = 'resource' | 'relic' | 'consumable' | 'gear' | 'quest' | 'currency';
+export type ItemCategory =
+  | 'resource'
+  | 'crafting_material'
+  | 'tool'
+  | 'equipment'
+  | 'recovery'
+  | 'quest'
+  | 'relic'
+  | 'collectible'
+  | 'event_reward'
+  | 'consumable'
+  | 'gear'
+  | 'currency';
+
+export type EquipmentSlotType = 'head' | 'body' | 'tool' | 'accessory';
+
+export interface EquippedGear {
+  head?: string | null;
+  body?: string | null;
+  tool?: string | null;
+  accessory?: string | null;
+}
+
+export interface CraftingIngredient {
+  itemId: string;
+  quantity: number;
+}
+
+export interface CraftingRecipe {
+  id: string;
+  name: string;
+  category: 'tools' | 'equipment' | 'recovery' | 'structures' | 'relics';
+  description: string;
+  ingredients: CraftingIngredient[];
+  result: {
+    itemId: string;
+    quantity: number;
+  };
+  station?: 'hand' | 'research_camp' | 'any';
+  icon: string;
+}
 
 export interface Vector3D {
   x: number;
@@ -52,6 +92,14 @@ export interface ItemDefinition {
   maxStack: number;
   icon: string;
   lore?: string;
+  equipSlot?: EquipmentSlotType;
+  equipBonus?: {
+    healthBonus?: number;
+    staminaBonus?: number;
+    speedBonus?: number;
+    miningBonus?: number;
+    lightRadius?: number;
+  };
   statsEffect?: {
     heal?: number;
     stamina?: number;
@@ -68,8 +116,47 @@ export interface InventorySlot {
 }
 
 export interface PlayerWallet {
-  sunstoneCoins: number; // Standard trader currency
+  driftCoins: number; // Standard archipelago currency (Drift Coins)
+  sunstoneCoins?: number; // Backwards-compatible alias
   aetherEssence: number; // Rare celestial upgrade currency
+}
+
+export interface TradeOffer {
+  itemId: string;
+  price: number; // in Drift Coins
+  stock?: number; // optional stock limit (-1 for unlimited)
+}
+
+export interface TraderCatalog {
+  id: string;
+  traderName: string;
+  title: string;
+  greeting: string;
+  offers: TradeOffer[];
+  canBuyPlayerItems: boolean;
+  sellPriceMultiplier: number;
+}
+
+export type NpcRole =
+  | 'SETTLER'
+  | 'RESEARCHER'
+  | 'MERCHANT'
+  | 'SCOUT'
+  | 'TRAVELER'
+  | 'LOST_EXPLORER'
+  | 'VILLAGE_LEADER'
+  | 'TRADING_CREATURE';
+
+export type NpcBehaviorState = 'WALKING' | 'RESTING' | 'GUARDING' | 'TRADING' | 'SHELTERING';
+
+export interface NpcSchedule {
+  dayBehavior: NpcBehaviorState;
+  nightBehavior: NpcBehaviorState;
+  stormBehavior: NpcBehaviorState;
+  redMoonBehavior: NpcBehaviorState;
+  patrolPoints?: [number, number, number][];
+  homePosition: [number, number, number];
+  shelterPosition: [number, number, number];
 }
 
 export interface ShardRelic {
@@ -124,14 +211,43 @@ export interface DimensionDefinition {
   regions: string[];
 }
 
+export type QuestCategory =
+  | 'main'
+  | 'side'
+  | 'exploration'
+  | 'collection'
+  | 'research'
+  | 'npc'
+  | 'crafting'
+  | 'boss'
+  | 'dimension'
+  | 'event';
+
+export type QuestState = 'locked' | 'available' | 'active' | 'completed' | 'LOCKED' | 'AVAILABLE' | 'ACTIVE' | 'COMPLETED';
+
+export type QuestObjectiveType =
+  | 'EXPLORE_AREA'
+  | 'COLLECT'
+  | 'DISCOVER'
+  | 'ACTIVATE_BEACON'
+  | 'READ_RECORD'
+  | 'ENTER_CHAMBER'
+  | 'LOCATE_DISTURBANCE'
+  | 'DISCOVER_PORTAL'
+  | 'CRAFT'
+  | 'INTERACT_NPC'
+  | 'DEFEAT_BOSS'
+  | 'SURVIVE_RED_MOON';
+
 export interface QuestObjective {
   id: string;
   description: string;
   targetCount: number;
   currentCount: number;
   completed: boolean;
-  type: 'COLLECT' | 'DISCOVER' | 'ACTIVATE_BEACON' | 'INTERACT_NPC' | 'DEFEAT_BOSS';
+  type: QuestObjectiveType;
   targetId?: string;
+  targetCoords?: [number, number, number];
 }
 
 export interface QuestReward {
@@ -143,6 +259,7 @@ export interface QuestReward {
 export interface QuestDefinition {
   id: string;
   title: string;
+  category: QuestCategory;
   giverName: string;
   regionId: string;
   description: string;
@@ -150,15 +267,49 @@ export interface QuestDefinition {
   objectives: QuestObjective[];
   rewards: QuestReward;
   prerequisiteQuestId?: string;
+  targetLocation?: [number, number, number];
+  targetLocationName?: string;
 }
 
 export interface QuestProgress {
   questId: string;
-  status: 'LOCKED' | 'AVAILABLE' | 'ACTIVE' | 'COMPLETED';
+  status: QuestState;
   objectives: Record<string, number>; // objectiveId -> current count
+  rewardsClaimed?: boolean;
+  completedAt?: number;
 }
 
-export type EntityType = 'CREATURE' | 'NPC' | 'COLLECTIBLE' | 'CHECKPOINT' | 'PORTAL' | 'BOSS';
+export type AchievementCategory =
+  | 'discovery'
+  | 'collection'
+  | 'crafting'
+  | 'checkpoints'
+  | 'boss'
+  | 'progression'
+  | 'event';
+
+export interface AchievementDefinition {
+  id: string;
+  title: string;
+  description: string;
+  category: AchievementCategory;
+  icon: string;
+  secret?: boolean;
+  rewards: {
+    experience: number;
+    coins: number;
+  };
+}
+
+export interface ExplorationRankInfo {
+  rank: number;
+  title: string;
+  requiredXp: number;
+  perkName: string;
+  perkDescription: string;
+}
+
+export type EntityType = 'CREATURE' | 'NPC' | 'COLLECTIBLE' | 'CHECKPOINT' | 'PORTAL' | 'BOSS' | 'TRADER';
 
 export interface WorldEntityDefinition {
   id: string;
@@ -167,6 +318,10 @@ export interface WorldEntityDefinition {
   position: [number, number, number];
   rotationY?: number;
   dialogue?: string[];
+  role?: NpcRole;
+  roleTitle?: string;
+  tradeCatalogId?: string;
+  schedule?: NpcSchedule;
   drops?: { itemId: string; chance: number; min: number; max: number }[];
   interactPrompt?: string;
 }
@@ -325,9 +480,23 @@ export interface SaveData {
   discoveries: string[];
   unlockedDoors: string[];
   harvestedDeposits: Record<string, number>;
+  harvestedFlora: Record<string, number>;
   discoveredChambers: string[];
   activatedGateways: string[];
   examinedRecords: string[];
+  hotbarSlots: (string | null)[];
+  equippedGear: EquippedGear;
+  trackedQuestId?: string | null;
+  explorationRank: number;
+  explorationXp: number;
+  achievements: Record<string, { unlocked: boolean; timestamp: number }>;
+  claimedQuestRewards: string[];
+  discoveredNpcs?: string[];
+  settlementProgress?: {
+    hearthRekindled: boolean;
+    spokeWithElder?: boolean;
+    traderStock?: Record<string, number>;
+  };
 }
 
 export interface InputState {

@@ -31,6 +31,7 @@ import { InputManager } from './input';
 import { EntityManager, RuntimeEntity } from '../systems/entityManager';
 import { InventorySystem } from '../systems/inventorySystem';
 import { QuestSystem } from '../systems/questSystem';
+import { AchievementSystem } from '../systems/achievementSystem';
 import { WeatherSystem } from '../systems/weatherSystem';
 import { CrimsonWardenEncounter } from '../systems/crimsonWarden';
 import { CheckpointSystem } from '../systems/checkpointSystem';
@@ -39,6 +40,9 @@ import { AudioService } from '../services/audio';
 import { StorageService } from '../services/storage';
 import { StructuresManager } from './structures';
 import { InteractionSystem } from '../systems/interactionSystem';
+import { FloraManager, FloraNode } from './floraManager';
+import { WildlifeManager, CreatureInstance } from '../systems/wildlifeManager';
+import { getContextualDialogue, DialogueContext } from '../data/npcDialogue';
 
 export interface EngineUiCallbacks {
   onStatsUpdate: (stats: {
@@ -62,7 +66,14 @@ export interface EngineUiCallbacks {
   onRelicUpdate: (shards: ShardRelic[], collectedCount: number, totalCount: number) => void;
   onInteractionAvailable: (prompt: string | null) => void;
   onBeaconStateChange: (activated: boolean) => void;
-  onNpcDialogue?: (dialogue: { name: string; lines: string[] } | null) => void;
+  onNpcDialogue?: (dialogue: {
+    name: string;
+    roleTitle?: string;
+    role?: string;
+    lines: string[];
+    tradeCatalogId?: string;
+  } | null) => void;
+  onOpenTradeModal?: (catalogId: string) => void;
   onToggleInventoryModal?: () => void;
   onToggleQuestsModal?: () => void;
   onToggleMapModal?: () => void;
@@ -83,8 +94,13 @@ export class GameEngine {
   public entities: EntityManager | null = null;
   public structures: StructuresManager | null = null;
   public interactions: InteractionSystem | null = null;
+  public flora: FloraManager | null = null;
+  public wildlife: WildlifeManager | null = null;
+  private nearbyFlora: { node: FloraNode; prompt: string; canHarvest: boolean } | null = null;
+  private nearbyCreature: CreatureInstance | null = null;
   public inventory: InventorySystem;
   public quests: QuestSystem;
+  public achievements: AchievementSystem;
   public weather: WeatherSystem;
   public crimsonWarden: CrimsonWardenEncounter | null = null;
   public checkpoints: CheckpointSystem;
@@ -119,9 +135,18 @@ export class GameEngine {
     // 1. Initialize Subsystems
     this.inventory = new InventorySystem(initialSave.inventory, initialSave.wallet);
 
+    this.achievements = new AchievementSystem(
+      this.inventory,
+      initialSave.achievements || {},
+      (xp) => this.addExperience(xp)
+    );
     this.quests = new QuestSystem(
       this.inventory,
       initialSave.quests,
+      initialSave.claimedQuestRewards || [],
+      initialSave.trackedQuestId || 'quest_main_1_clearing',
+      initialSave.explorationRank || 1,
+      initialSave.explorationXp || 0,
       (xp) => this.addExperience(xp)
     );
 
@@ -185,7 +210,54 @@ export class GameEngine {
       this.structures = new StructuresManager(this.bundle.scene, this.bundle.isSoftwareGl);
       this.structures.buildAll(this.world.getTerrainHeight, this.activeSave);
 
-      // 6C. Build Unified Interaction System
+      // 10. Procedural Flora & Gathering Nodes (Prompt 7)
+      this.flora = new FloraManager(this.bundle.scene, this.bundle.isSoftwareGl);
+      this.flora.populate(
+        (x, z) => this.world!.getTerrainHeight(x, z),
+        this.inventory,
+        this.activeSave
+      );
+
+      // 11. Wildlife Simulation (Prompt 9: 8 original species)
+      this.wildlife = new WildlifeManager(
+        this.bundle.scene,
+        this.world.getTerrainHeight,
+        this.inventory,
+        this.bundle.isSoftwareGl,
+        (damage) => {
+          if (!this.player) return;
+          this.player.stats.health = Math.max(0, this.player.stats.health - damage);
+          this.cameraManager?.addShake(0.4);
+          if (this.player.stats.health <= 0) {
+            this.handlePlayerDefeat();
+          }
+        }
+      );
+      this.wildlife.populate();
+
+      // Equipment passive perks listener
+      this.inventory.subscribe((_slots, _wallet, _hotbar, _equipped) => {
+        this.applyEquipmentBonuses();
+      });
+
+      // Hook crafting triggers to quests & achievements
+      this.inventory.onRecipeCrafted = (_recipeId, outputItemId) => {
+        this.quests.reportProgress('CRAFT', outputItemId, 1);
+        this.achievements.unlock('ach_artisan');
+        this.persistSave();
+      };
+
+      // Hook exploration rank changes
+      this.quests.onRankChanged = (_rank, _perk) => {
+        this.applyEquipmentBonuses();
+        this.persistSave();
+      };
+
+      // Evaluate milestone achievements & starting clearing quest
+      this.achievements.evaluateMilestones(this.activeSave);
+      this.quests.reportProgress('EXPLORE_AREA', 'clearing_spawn', 1);
+      this.applyEquipmentBonuses();
+
       this.interactions = new InteractionSystem(
         this.activeSave,
         this.inventory,
@@ -436,6 +508,11 @@ export class GameEngine {
 
     // 1. Day/Night progression (20-minute cycle with exact countdown)
     this.dayNight.update(dt);
+      if (this.flora) {
+        const isNight = this.dayNight.state.phaseName === 'NIGHT' || this.dayNight.state.phaseName === 'RED_MOON';
+        const isRedMoon = this.dayNight.state.isRedMoon;
+        this.flora.update(dt, this.totalSimulationTime, isNight, isRedMoon);
+      }
     this.uiCallbacks.onTimeUpdate({
       phase: this.dayNight.state.phaseName,
       cycleTime: this.dayNight.state.cycleTime,
@@ -464,8 +541,13 @@ export class GameEngine {
     // 3B. Structures animation (astrolabe rings, gates, crystals, dimensional gateway vortex)
     this.structures?.update(dt, this.totalSimulationTime);
 
-    // 4. Entity updates (Wisps fluttering, NPC breathing, Red Moon orchids)
-    this.entities?.update(dt, this.totalSimulationTime, this.dayNight.state.isRedMoon);
+    // 4. Entity updates (NPCs, schedules, trading creatures, wisps)
+    this.entities?.update(dt, this.totalSimulationTime, this.dayNight.state, this.activeSave.discoveries);
+
+    // 4B. Wildlife simulation (8 original species)
+    this.wildlife?.update(dt, this.totalSimulationTime, this.player.group.position, {
+      isRedMoon: Boolean(this.dayNight.state.isRedMoon),
+    });
 
     // 5. Crimson Warden Boss simulation
     if (this.crimsonWarden) {
@@ -589,6 +671,17 @@ export class GameEngine {
       }
     }
 
+        // Check Flora gathering nodes
+    this.nearbyFlora = null;
+    if (!foundPrompt && this.flora && this.dayNight) {
+      const isNight = this.dayNight ? (this.dayNight.state.phaseName === 'NIGHT' || this.dayNight.state.phaseName === 'RED_MOON') : false;
+      const isRedMoon = this.dayNight ? this.dayNight.state.isRedMoon : false;
+      const floraTarget = this.flora.getNearbyHarvestable(playerPos, isNight, isRedMoon, this.weather.state.currentWeather);
+      if (floraTarget) {
+        this.nearbyFlora = floraTarget;
+        foundPrompt = floraTarget.prompt;
+      }
+    }
     // 4. Check Shards
     if (!foundPrompt) {
       this.world.shards.forEach((entry) => {
@@ -610,16 +703,51 @@ export class GameEngine {
       }
     }
 
-    // 6. Check Ancient Beacon
+    // 5B. Check Wildlife (Cloudgrazer, Emberfox, Glowhare, Mossback, etc.)
+    this.nearbyCreature = null;
+    if (!foundPrompt && this.wildlife) {
+      const creature = this.wildlife.getNearbyCreature(playerPos, 3.2);
+      if (creature && !creature.isHarvested) {
+        this.nearbyCreature = creature;
+        foundPrompt = creature.harvestPrompt || `Press [E] to interact with ${creature.name}`;
+      }
+    }
+
+    // Storyline triggers: Clearing & Beacon Proximity
     const beaconDist = Math.hypot(playerPos.x, playerPos.z);
+    if (beaconDist < 25) {
+      this.quests.reportProgress('EXPLORE_AREA', 'clearing_spawn', 1);
+    }
+    if (beaconDist < 16) {
+      this.quests.reportProgress('DISCOVER', 'disc_beacon_plaza', 1);
+      if (!this.activeSave.discoveries.includes('disc_beacon_plaza')) {
+        this.activeSave.discoveries.push('disc_beacon_plaza');
+      }
+    }
+
+    // Storyline triggers: Gateway & Disturbance Proximity
+    const distToGateway = Math.hypot(playerPos.x - (-50), playerPos.z - (-20));
+    if (distToGateway < 14) {
+      this.quests.reportProgress('LOCATE_DISTURBANCE', 'disc_void_rift_island', 1);
+      this.quests.reportProgress('DISCOVER_PORTAL', 'disc_dimensional_gateway', 1);
+      if (!this.activeSave.discoveries.includes('disc_dimensional_gateway')) {
+        this.activeSave.discoveries.push('disc_dimensional_gateway');
+      }
+      if (!this.activeSave.discoveries.includes('disc_void_rift_island')) {
+        this.activeSave.discoveries.push('disc_void_rift_island');
+      }
+    }
+
+    // 6. Check Ancient Beacon
     if (!foundPrompt && beaconDist < 6.5) {
       this.isNearBeacon = true;
       if (!this.world.beacon.data.activated) {
         const collectedCount = this.activeSave.collectedShardIds.length;
-        if (collectedCount >= this.world.beacon.data.requiredShards) {
-          foundPrompt = 'Press [E] or Tap to awaken the Ancient Monolith Beacon';
+        const q3Done = this.quests.getJournalSnapshot().completed.some((q) => q.id === 'quest_main_3_repair');
+        if (q3Done || collectedCount >= this.world.beacon.data.requiredShards) {
+          foundPrompt = 'Press [E] or Action to Awaken Ancient Monolith Beacon!';
         } else {
-          foundPrompt = `Ancient Beacon requires ${this.world.beacon.data.requiredShards - collectedCount} more Drift Shards`;
+          foundPrompt = `Beacon Dais Fractured — Repair Materials or Shards Needed (${collectedCount}/${this.world.beacon.data.requiredShards})`;
         }
       } else {
         foundPrompt = 'The Ancient Monolith Beacon is glowing with celestial resonance';
@@ -635,6 +763,29 @@ export class GameEngine {
   /**
    * Handle interact key [E] or touch button
    */
+  /**
+   * Sync active gear perks to player controller
+   */
+  public applyEquipmentBonuses(): void {
+    if (!this.player) return;
+    const bonuses = this.inventory.getEquipBonuses();
+    this.player.stats.speed = 8.5 + (bonuses.speedBonus || 0);
+    this.player.stats.maxHealth = 100 + (bonuses.healthBonus || 0);
+    this.player.stats.maxStamina = 100 + (bonuses.staminaBonus || 0);
+    this.player.stats.health = Math.min(this.player.stats.health, this.player.stats.maxHealth);
+    this.player.stats.stamina = Math.min(this.player.stats.stamina, this.player.stats.maxStamina);
+
+    const expPerks = this.quests.getExplorationPerks();
+    this.player.sprintDrainModifier = expPerks.staminaEfficiency ? 0.85 : 1.0;
+    this.player.staminaRegenModifier = 1.0 + expPerks.regenBonus;
+
+    const lanternLight = (this.player as any).lanternLight as THREE.PointLight | undefined;
+    if (lanternLight) {
+      lanternLight.distance = 8 + (bonuses.lightRadius || 0);
+      lanternLight.intensity = bonuses.lightRadius ? 1.4 : 0.9;
+    }
+  }
+
   public handleInteract(): void {
     if (this.mode !== 'PLAYING' || !this.world || !this.player) return;
 
@@ -652,6 +803,22 @@ export class GameEngine {
       return;
     }
 
+        // Check Flora harvesting
+    if (this.nearbyFlora && this.nearbyFlora.canHarvest && this.flora) {
+      const node = this.nearbyFlora.node;
+      const harvested = this.flora.harvestNode(node.id, this.inventory, this.activeSave);
+      if (harvested) {
+        this.cameraManager?.addShake(0.2);
+        this.quests.reportProgress('COLLECT', node.yieldItemId, 1);
+        const discId = `flora_${node.plantType}`;
+        if (!this.activeSave.discoveries.includes(discId)) {
+          this.activeSave.discoveries.push(discId);
+          this.quests.reportProgress('DISCOVER', discId, 1);
+        }
+        this.persistSave();
+        return;
+      }
+    }
     // 2. Collect Shard
     if (this.nearbyShard && !this.nearbyShard.collected) {
       const entry = this.world.shards.get(this.nearbyShard.id);
@@ -678,13 +845,34 @@ export class GameEngine {
       return;
     }
 
-    // 3. Interact with Entity (NPC Dialogue or Harvest)
+    // 3. Interact with Entity (NPC Contextual Dialogue or Harvest)
     if (this.nearbyEntity) {
       const def = this.nearbyEntity.def;
-      if (def.type === 'NPC' && def.dialogue) {
-        this.uiCallbacks.onNpcDialogue?.({ name: def.name, lines: def.dialogue });
+      if (def.type === 'NPC' || def.type === 'TRADER') {
+        const ctx: DialogueContext = {
+          timePhase: this.dayNight?.state.phaseName || 'NOON',
+          isRedMoon: Boolean(this.dayNight?.state.isRedMoon),
+          weatherName: this.weather.state.currentWeather,
+          explorationRank: this.quests.explorationRank,
+          beaconActivated: Boolean(this.activeSave.beaconStates['verdant_monolith_beacon']),
+          discoveries: this.activeSave.discoveries,
+          activeQuestId: this.quests.getTrackedQuestId(),
+          completedQuestIds: this.quests.getJournalSnapshot().completed.map((q) => q.id),
+        };
+        const node = getContextualDialogue(def.id, ctx);
+        this.uiCallbacks.onNpcDialogue?.({
+          name: node.speakerName,
+          roleTitle: node.roleTitle,
+          role: node.role,
+          lines: node.lines,
+          tradeCatalogId: node.tradeCatalogId,
+        });
         AudioService.playUiClick();
         this.quests.reportProgress('INTERACT_NPC', def.id, 1);
+        if (!this.activeSave.discoveredNpcs) this.activeSave.discoveredNpcs = [];
+        if (!this.activeSave.discoveredNpcs.includes(def.id)) {
+          this.activeSave.discoveredNpcs.push(def.id);
+        }
         return;
       }
 
@@ -704,15 +892,28 @@ export class GameEngine {
       }
     }
 
+    // 3B. Interact with Wildlife (Gather wool, pelts, feathers, scutes, etc.)
+    if (this.nearbyCreature && this.wildlife) {
+      const harvested = this.wildlife.harvest(this.nearbyCreature);
+      if (harvested) {
+        this.quests.reportProgress('COLLECT', this.nearbyCreature.harvestItemId, 1);
+        this.persistSave();
+        return;
+      }
+    }
+
     // 4. Awaken Beacon
     if (this.isNearBeacon && !this.world.beacon.data.activated) {
       const collectedCount = this.activeSave.collectedShardIds.length;
-      if (collectedCount >= this.world.beacon.data.requiredShards) {
+      const q3Done = this.quests.getJournalSnapshot().completed.some((q) => q.id === 'quest_main_3_repair');
+      if (q3Done || collectedCount >= this.world.beacon.data.requiredShards) {
         this.world.beacon.data.activated = true;
         this.activeSave.beaconStates['verdant_monolith_beacon'] = true;
 
         // Quest progress
         this.quests.reportProgress('ACTIVATE_BEACON', 'verdant_monolith_beacon', 1);
+        this.achievements.unlock('ach_beacon_ignited');
+        this.quests.addExplorationXp(120);
 
         // Heavy audio & screen shake feedback
         AudioService.playBeaconActivate();
@@ -769,6 +970,34 @@ export class GameEngine {
   /**
    * Save current game progress
    */
+    /**
+   * Fast travel between attuned checkpoints
+   */
+  public fastTravel(checkpointId: string): boolean {
+    const cp = this.checkpoints.getCheckpoints().find((c) => c.id === checkpointId && c.activated);
+    if (!cp || !this.player) return false;
+    this.player.group.position.set(cp.position[0], cp.position[1] + 0.8, cp.position[2]);
+    this.player.velocity.set(0, 0, 0);
+    this.cameraManager?.addShake(0.3);
+    AudioService.playRelicCollect();
+    NotificationSystem.notify('Fast Travel Complete', `Attuned to ${cp.name}`, 'info', 4000);
+    this.persistSave();
+    return true;
+  }
+
+  public getTrackedQuest(): { def: any; progress: any; activeObjectiveText: string } | null {
+    const active = this.quests.getTrackedQuest();
+    if (!active) return null;
+    const firstObj = active.def.objectives[0];
+    const current = active.progress.objectives[firstObj.id] || 0;
+    const text = `${firstObj.description} (${current}/${firstObj.targetCount})`;
+    return {
+      def: active.def,
+      progress: active.progress,
+      activeObjectiveText: text,
+    };
+  }
+
   public persistSave(): void {
     if (!this.player || !this.dayNight) return;
     this.activeSave.playerPosition = [
@@ -779,8 +1008,25 @@ export class GameEngine {
     this.activeSave.playerRotationY = this.player.facingAngle;
     this.activeSave.playerStats = { ...this.player.stats };
     this.activeSave.wallet = { ...this.inventory.wallet };
+    this.activeSave.hotbarSlots = [...this.inventory.hotbar];
+    this.activeSave.equippedGear = { ...this.inventory.equipped };
+    if (this.flora) {
+      const harvestedData: Record<string, number> = {};
+      this.flora.nodes.forEach((n, id) => {
+        if (n.isHarvested) {
+          harvestedData[id] = n.harvestTimestamp;
+        }
+      });
+      this.activeSave.harvestedFlora = harvestedData;
+    }
+
     this.activeSave.inventory = this.inventory.serialize();
     this.activeSave.quests = this.quests.serialize();
+    this.activeSave.trackedQuestId = this.quests.getTrackedQuestId();
+    this.activeSave.claimedQuestRewards = this.quests.getClaimedRewards();
+    this.activeSave.explorationRank = this.quests.explorationRank;
+    this.activeSave.explorationXp = this.quests.explorationXp;
+    this.activeSave.achievements = this.achievements.serialize();
     this.activeSave.activatedCheckpoints = this.checkpoints.getActivatedIds();
     this.activeSave.activeCheckpointId = this.checkpoints.getActiveCheckpoint()?.id;
     this.activeSave.currentWeather = this.weather.state.currentWeather;
@@ -930,6 +1176,7 @@ export class GameEngine {
     AudioService.stopAmbience();
     this.player?.dispose();
     this.entities?.dispose();
+    this.wildlife?.dispose();
     this.structures?.dispose();
     this.crimsonWarden?.dispose();
     this.weather?.dispose();

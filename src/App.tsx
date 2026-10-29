@@ -6,7 +6,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { GameMode, SaveData, GameSettings, ShardRelic, CrimsonWardenState, WeatherType } from './types/game';
+import { GameMode, SaveData, GameSettings, ShardRelic, CrimsonWardenState, WeatherType, EquippedGear, QuestDefinition, QuestProgress, TraderCatalog } from './types/game';
 import { StorageService, createInitialSave } from './services/storage';
 import { GameEngine } from './engine/gameLoop';
 import { GameCanvas } from './components/GameCanvas';
@@ -18,18 +18,24 @@ import { InventoryModal } from './components/InventoryModal';
 import { QuestJournalModal } from './components/QuestJournalModal';
 import { MapModal } from './components/MapModal';
 import { DialogueModal } from './components/DialogueModal';
+import { TradeModal } from './components/TradeModal';
 import { NotificationToast } from './components/NotificationToast';
 import { DiagnosticScreen } from './components/DiagnosticScreen';
 import { DevPanel } from './components/DevPanel';
 import { AudioService } from './services/audio';
+import { getTraderCatalog } from './data/traders';
 
 export default function App() {
   const [mode, setMode] = useState<GameMode>('TITLE');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isInitializing, setIsInitializing] = useState<boolean>(true);
   const [cameraLabel, setCameraLabel] = useState<string>('THIRD PERSON');
+  const [hotbar, setHotbar] = useState<(string | null)[]>([null, null, null, null, null, null]);
+  const [equipped, setEquipped] = useState<EquippedGear>({ head: null, body: null, tool: null, accessory: null });
+  const [trackedQuest, setTrackedQuest] = useState<{ def: QuestDefinition; progress: QuestProgress; activeObjectiveText: string } | null>(null);
   const [isDevPanelOpen, setIsDevPanelOpen] = useState<boolean>(false);
   const [bossState, setBossState] = useState<CrimsonWardenState | null>(null);
+  const [activeTraderCatalog, setActiveTraderCatalog] = useState<TraderCatalog | null>(null);
 
   // Persistent save and settings
   const [activeSave, setActiveSave] = useState<SaveData>(() => StorageService.loadSave());
@@ -79,7 +85,13 @@ export default function App() {
 
   const [beaconActivated, setBeaconActivated] = useState<boolean>(false);
   const [interactionPrompt, setInteractionPrompt] = useState<string | null>(null);
-  const [activeDialogue, setActiveDialogue] = useState<{ name: string; lines: string[] } | null>(null);
+  const [activeDialogue, setActiveDialogue] = useState<{
+    name: string;
+    roleTitle?: string;
+    role?: string;
+    lines: string[];
+    tradeCatalogId?: string;
+  } | null>(null);
 
   // Touch device detection
   const [isTouchDevice, setIsTouchDevice] = useState<boolean>(() => {
@@ -89,6 +101,22 @@ export default function App() {
   // Engine instance ref
   const engineRef = useRef<GameEngine | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+
+  const handleOpenTrade = useCallback((catalogId: string) => {
+    const catalog = getTraderCatalog(catalogId);
+    if (catalog) {
+      setActiveDialogue(null);
+      setActiveTraderCatalog(catalog);
+      setMode('TRADE');
+      engineRef.current?.setMode('TRADE');
+    }
+  }, []);
+
+  const handleCloseTrade = useCallback(() => {
+    setActiveTraderCatalog(null);
+    setMode('PLAYING');
+    engineRef.current?.setMode('PLAYING');
+  }, []);
 
   /**
    * Bootstraps the WebGL GameEngine
@@ -121,6 +149,7 @@ export default function App() {
           onInteractionAvailable: (prompt) => setInteractionPrompt(prompt),
           onBeaconStateChange: (act) => setBeaconActivated(act),
           onNpcDialogue: (dialogue) => setActiveDialogue(dialogue),
+          onOpenTradeModal: (catalogId) => handleOpenTrade(catalogId),
           onToggleInventoryModal: () => {
             setMode((prev) => (prev === 'INVENTORY' ? 'PLAYING' : 'INVENTORY'));
             engineRef.current?.setMode('INVENTORY');
@@ -149,6 +178,20 @@ export default function App() {
 
       await engine.init();
       engineRef.current = engine;
+      // Subscribe to hotbar and equipment changes
+      engine.inventory.subscribe((_slots, _wallet, newHotbar, newEquipped) => {
+        setHotbar([...newHotbar]);
+        setEquipped({ ...newEquipped });
+      });
+      setHotbar([...engine.inventory.hotbar]);
+      setEquipped({ ...engine.inventory.equipped });
+
+      // Subscribe to active quest updates
+      engine.quests.subscribe(() => {
+        setTrackedQuest(engine.getTrackedQuest());
+      });
+      setTrackedQuest(engine.getTrackedQuest());
+
       setCameraLabel(engine.getCameraLabel());
       setIsInitializing(false);
     } catch (err: any) {
@@ -183,8 +226,9 @@ export default function App() {
     if (mode === 'PLAYING') {
       setMode('PAUSED');
       engineRef.current?.setMode('PAUSED');
-    } else if (mode === 'PAUSED' || mode === 'INVENTORY' || mode === 'QUESTS' || mode === 'MAP') {
+    } else if (mode === 'PAUSED' || mode === 'INVENTORY' || mode === 'QUESTS' || mode === 'MAP' || mode === 'TRADE') {
       setMode('PLAYING');
+      setActiveTraderCatalog(null);
       engineRef.current?.setMode('PLAYING');
     }
   };
@@ -298,6 +342,13 @@ export default function App() {
     engineRef.current?.input.setTouchAction(action, active);
   };
 
+    const handleUseHotbarSlot = (slotIndex: number) => {
+    if (!engineRef.current) return;
+    engineRef.current.inventory.useHotbarSlot(slotIndex, (consumableId) => {
+      engineRef.current?.useItem(consumableId);
+    });
+  };
+
   const handleUseItem = (itemId: string) => {
     engineRef.current?.useItem(itemId);
   };
@@ -345,6 +396,10 @@ export default function App() {
           beaconActivated={beaconActivated}
           interactionPrompt={interactionPrompt}
           cameraLabel={cameraLabel}
+          trackedQuest={trackedQuest}
+          hotbar={hotbar}
+          equipped={equipped}
+          onUseHotbarSlot={handleUseHotbarSlot}
           onSwitchCamera={handleSwitchCamera}
           onOpenMap={handleToggleMap}
           onInteract={handleInteract}
@@ -386,7 +441,17 @@ export default function App() {
       {activeDialogue && (
         <DialogueModal
           dialogue={activeDialogue}
+          onOpenTrade={(catalogId) => handleOpenTrade(catalogId)}
           onClose={() => setActiveDialogue(null)}
+        />
+      )}
+
+      {/* Modal: Trader Outpost & Merchant Shop */}
+      {mode === 'TRADE' && activeTraderCatalog && engineRef.current && (
+        <TradeModal
+          catalog={activeTraderCatalog}
+          inventory={engineRef.current.inventory}
+          onClose={handleCloseTrade}
         />
       )}
 
@@ -397,6 +462,9 @@ export default function App() {
           playerYaw={engineRef.current.getPlayerFacingAngle()}
           relics={relics.shards}
           checkpoints={engineRef.current.getCheckpoints()}
+          discoveries={activeSave.discoveries}
+          trackedQuest={trackedQuest}
+          onFastTravel={(cpId) => engineRef.current?.fastTravel(cpId)}
           onClose={() => {
             setMode('PLAYING');
             engineRef.current?.setMode('PLAYING');
@@ -420,6 +488,7 @@ export default function App() {
       {mode === 'QUESTS' && engineRef.current && (
         <QuestJournalModal
           questSystem={engineRef.current.quests}
+          achievementSystem={engineRef.current.achievements}
           discoveries={activeSave.discoveries}
           onClose={() => {
             setMode('PLAYING');

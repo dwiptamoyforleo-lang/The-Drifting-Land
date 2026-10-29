@@ -28,8 +28,10 @@ import {
   Wrench,
   Skull,
   AlertTriangle,
+  Star,
 } from 'lucide-react';
-import { ShardRelic, CrimsonWardenState } from '../types/game';
+import { ShardRelic, CrimsonWardenState, EquippedGear, QuestDefinition } from '../types/game';
+import { getItemDef } from '../data/items';
 
 interface HUDProps {
   stats: {
@@ -60,6 +62,13 @@ interface HUDProps {
   beaconActivated: boolean;
   interactionPrompt: string | null;
   cameraLabel: string;
+  trackedQuest?: {
+    def: QuestDefinition;
+    activeObjectiveText: string;
+  } | null;
+  hotbar?: (string | null)[];
+  equipped?: EquippedGear;
+  onUseHotbarSlot?: (slotIndex: number) => void;
   onSwitchCamera: () => void;
   onOpenMap: () => void;
   onInteract: () => void;
@@ -84,6 +93,10 @@ export const HUD: React.FC<HUDProps> = ({
   beaconActivated,
   interactionPrompt,
   cameraLabel,
+  trackedQuest,
+  hotbar = [null, null, null, null, null, null],
+  equipped = { head: null, body: null, tool: null, accessory: null },
+  onUseHotbarSlot,
   onSwitchCamera,
   onOpenMap,
   onInteract,
@@ -105,6 +118,21 @@ export const HUD: React.FC<HUDProps> = ({
   const [joystickThumb, setJoystickThumb] = useState({ x: 0, y: 0 });
   const touchIdRef = useRef<number | null>(null);
   const joyCenterRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  // Hotbar keyboard keys 1..6
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) return;
+      if (e.key >= '1' && e.key <= '6') {
+        const slotIdx = parseInt(e.key, 10) - 1;
+        if (slotIdx >= 0 && slotIdx < 6) {
+          onUseHotbarSlot?.(slotIdx);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onUseHotbarSlot]);
 
   const handleJoystickTouchStart = (e: React.TouchEvent) => {
     e.stopPropagation();
@@ -171,7 +199,9 @@ export const HUD: React.FC<HUDProps> = ({
     <div className="absolute inset-0 pointer-events-none select-none z-10 flex flex-col justify-between p-3 sm:p-6 overflow-hidden">
       {/* Top Bar Perimeter Clusters */}
       <div className="flex items-start justify-between w-full gap-2">
-        {/* Top-Left: Player Vital Status Cluster */}
+        {/* Top-Left: Player Vital Status & Quest Objective */}
+        <div className="flex flex-col gap-2">
+          {/* Player Vital Status Cluster */}
         <div className="flex flex-col gap-1.5 sm:gap-2 bg-[#0c121d]/90 border border-slate-800/90 rounded-2xl p-2.5 sm:p-3 shadow-xl max-w-xs pointer-events-auto">
           {/* Level Badge & XP bar */}
           <div className="flex items-center justify-between text-xs font-mono mb-0.5">
@@ -217,6 +247,26 @@ export const HUD: React.FC<HUDProps> = ({
             </span>
           </div>
         </div>
+
+        {/* Active Quest Objective HUD Widget */}
+        {trackedQuest && (
+          <button
+            onClick={onOpenQuests}
+            className="pointer-events-auto bg-[#0c121d]/95 hover:bg-[#152238] border border-amber-500/50 rounded-2xl px-3 py-2 shadow-xl flex items-center gap-2 transition-all max-w-[220px] sm:max-w-xs text-left cursor-pointer"
+            title="Tracked Quest Objective — Click or press [J] to open Codex"
+          >
+            <Star className="w-3.5 h-3.5 text-amber-400 fill-amber-400 shrink-0" />
+            <div className="flex flex-col min-w-0">
+              <span className="text-[10px] font-mono text-amber-300 font-bold truncate">
+                {trackedQuest.def.title}
+              </span>
+              <span className="text-[10px] font-mono text-slate-300 truncate">
+                {trackedQuest.activeObjectiveText}
+              </span>
+            </div>
+          </button>
+        )}
+      </div>
 
         {/* Top-Center: Crimson Warden Boss Bar (or Camera Badge) */}
         <div className="pointer-events-auto flex flex-col items-center flex-1 max-w-sm sm:max-w-md mx-2">
@@ -393,6 +443,62 @@ export const HUD: React.FC<HUDProps> = ({
 
         {/* Unified Bottom Dock (Pinned to Bottom-Center) */}
         <div className="pointer-events-auto flex flex-col items-center">
+          {/* Quick Hotbar (6 Slots) */}
+          <div className="mb-2 flex items-center gap-1.5 sm:gap-2 bg-[#080d16]/95 border border-slate-800/90 rounded-2xl p-1.5 shadow-2xl">
+            {hotbar.map((itemId, idx) => {
+              const def = itemId ? getItemDef(itemId) : null;
+              const isEquipped = itemId
+                ? Object.values(equipped).includes(itemId)
+                : false;
+
+              return (
+                <button
+                  key={idx}
+                  onClick={() => onUseHotbarSlot?.(idx)}
+                  className={`relative w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center transition-all cursor-pointer select-none ${
+                    isEquipped
+                      ? 'bg-amber-950/70 border-2 border-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.35)]'
+                      : def
+                      ? 'bg-[#121c2d]/90 border border-slate-700/80 hover:border-slate-500 hover:bg-[#1a273e]'
+                      : 'bg-slate-900/40 border border-slate-800/60 hover:border-slate-700'
+                  }`}
+                  title={
+                    def
+                      ? `[${idx + 1}] ${def.name} - ${
+                          def.category === 'recovery'
+                            ? 'Click or [Key] to Consume'
+                            : isEquipped
+                            ? 'Equipped (Click to Unequip)'
+                            : 'Click to Equip'
+                        }`
+                      : `Slot ${idx + 1} (Empty - assign in Inventory [I])`
+                  }
+                >
+                  {/* Slot index keybadge */}
+                  <span className="absolute top-1 left-1.5 text-[9px] font-mono text-slate-400 font-bold leading-none pointer-events-none">
+                    {idx + 1}
+                  </span>
+
+                  {/* Item icon or placeholder */}
+                  {def ? (
+                    <span className="text-base sm:text-lg select-none">
+                      {def.icon || '📦'}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-slate-600 font-mono select-none">
+                      -
+                    </span>
+                  )}
+
+                  {/* Equipped marker indicator */}
+                  {isEquipped && (
+                    <span className="absolute bottom-1 right-1 w-2 h-2 rounded-full bg-amber-400 shadow-sm" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
           {/* Collapse/Expand Toggle Button */}
           <button
             onClick={() => setDockCollapsed((prev) => !prev)}

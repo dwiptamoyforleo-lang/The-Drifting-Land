@@ -286,6 +286,56 @@ export class AudioService {
   }
 
   /**
+   * Sound effect: Player or creature takes damage
+   */
+  static playDamage(): void {
+    if (!this.ctx || !this.masterGain || this.isMuted) return;
+    try {
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(140, now);
+      osc.frequency.exponentialRampToValueAtTime(60, now + 0.15);
+
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+
+      osc.start(now);
+      osc.stop(now + 0.2);
+    } catch {}
+  }
+
+  /**
+   * Sound effect: Item / flora / creature drop collected
+   */
+  static playItemCollect(): void {
+    if (!this.ctx || !this.masterGain || this.isMuted) return;
+    try {
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(650, now);
+      osc.frequency.exponentialRampToValueAtTime(880, now + 0.08);
+
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+
+      osc.start(now);
+      osc.stop(now + 0.11);
+    } catch {}
+  }
+
+  /**
    * Sound effect: Door / Gate Unlocked (mechanical stone slide & resonance)
    */
   static playDoorUnlock(): void {
