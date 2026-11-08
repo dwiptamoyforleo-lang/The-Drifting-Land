@@ -29,11 +29,29 @@ import {
   Skull,
   AlertTriangle,
   Star,
+  Sword,
+  Orbit,
+  Coins,
+  CheckCircle,
 } from 'lucide-react';
-import { ShardRelic, CrimsonWardenState, EquippedGear, QuestDefinition } from '../types/game';
+import {
+  ShardRelic,
+  ActiveBossState,
+  CrimsonWardenState,
+  EquippedGear,
+  QuestDefinition,
+  PlayerWallet,
+} from '../types/game';
 import { getItemDef } from '../data/items';
+import { REGIONS, DIMENSIONS } from '../data/regions';
 
 interface HUDProps {
+  regionId?: string;
+  wallet?: PlayerWallet;
+  saveStatus?: { lastSaved: number; isSaving?: boolean };
+  hudVisibility?: 'full' | 'compact' | 'minimal' | 'hidden';
+  mobileButtonSize?: 'normal' | 'large';
+  mobileHaptics?: boolean;
   stats: {
     health: number;
     maxHealth: number;
@@ -52,7 +70,7 @@ interface HUDProps {
     nextTransitionLabel?: string;
     nextTransitionSeconds?: number;
   };
-  bossState?: CrimsonWardenState | null;
+  bossState?: ActiveBossState | null;
   weatherName: string;
   relics: {
     shards: ShardRelic[];
@@ -72,6 +90,7 @@ interface HUDProps {
   onSwitchCamera: () => void;
   onOpenMap: () => void;
   onInteract: () => void;
+  onAttack?: () => void;
   onOpenInventory: () => void;
   onOpenQuests: () => void;
   onTogglePause: () => void;
@@ -81,10 +100,16 @@ interface HUDProps {
   onOpenDevPanel?: () => void;
   showTouchControls: boolean;
   onJoystickMove: (x: number, y: number) => void;
-  onTouchAction: (action: 'jump' | 'dash' | 'interact' | 'sprint', active: boolean) => void;
+  onTouchAction: (action: 'jump' | 'dash' | 'interact' | 'sprint' | 'attack', active: boolean) => void;
 }
 
 export const HUD: React.FC<HUDProps> = ({
+  regionId = 'verdant_reach',
+  wallet = { driftCoins: 75, aetherEssence: 0 },
+  saveStatus,
+  hudVisibility = 'full',
+  mobileButtonSize = 'normal',
+  mobileHaptics = true,
   stats,
   timeState,
   bossState,
@@ -100,6 +125,7 @@ export const HUD: React.FC<HUDProps> = ({
   onSwitchCamera,
   onOpenMap,
   onInteract,
+  onAttack,
   onOpenInventory,
   onOpenQuests,
   onTogglePause,
@@ -193,6 +219,23 @@ export const HUD: React.FC<HUDProps> = ({
     return () => window.removeEventListener('keydown', handleKey);
   }, []);
 
+  if (hudVisibility === 'hidden') {
+    return null;
+  }
+
+  const isMinimal = hudVisibility === 'minimal';
+  const isCompact = hudVisibility === 'compact';
+  const touchBtnSize = mobileButtonSize === 'large' ? 'w-14 h-14 text-xs' : 'w-12 h-12 text-[11px]';
+
+  const triggerTouchAction = (action: 'jump' | 'dash' | 'interact' | 'sprint' | 'attack', active: boolean) => {
+    if (active && mobileHaptics && typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      try {
+        navigator.vibrate(10);
+      } catch {}
+    }
+    onTouchAction(action, active);
+  };
+
   const xpPercent = Math.min(100, Math.round((stats.experience / Math.max(1, stats.experienceToNext)) * 100));
 
   return (
@@ -249,7 +292,7 @@ export const HUD: React.FC<HUDProps> = ({
         </div>
 
         {/* Active Quest Objective HUD Widget */}
-        {trackedQuest && (
+        {!isMinimal && trackedQuest && (
           <button
             onClick={onOpenQuests}
             className="pointer-events-auto bg-[#0c121d]/95 hover:bg-[#152238] border border-amber-500/50 rounded-2xl px-3 py-2 shadow-xl flex items-center gap-2 transition-all max-w-[220px] sm:max-w-xs text-left cursor-pointer"
@@ -275,7 +318,9 @@ export const HUD: React.FC<HUDProps> = ({
               <div className="w-full flex items-center justify-between text-xs font-mono mb-1">
                 <div className="flex items-center gap-1.5 text-red-300 font-bold tracking-wider">
                   <Skull className="w-4 h-4 text-red-500 animate-spin" />
-                  <span className="text-[11px] sm:text-xs">CRIMSON WARDEN</span>
+                  <span className="text-[11px] sm:text-xs truncate max-w-[150px] sm:max-w-[220px]">
+                    {bossState.name ? bossState.name.toUpperCase() : 'WORLD BOSS'}
+                  </span>
                 </div>
                 <span
                   className={`text-[10px] px-1.5 py-0.2 rounded font-bold ${
@@ -381,10 +426,41 @@ export const HUD: React.FC<HUDProps> = ({
 
             <span className="w-px h-3 bg-slate-700 hidden sm:block" />
 
+            {/* Region / Realm indicator */}
+            <div className="hidden md:flex items-center gap-1 text-[11px] font-mono text-emerald-300">
+              <Orbit className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="truncate max-w-[120px] font-semibold">
+                {REGIONS[regionId]?.name || 'Archipelago'}
+              </span>
+            </div>
+
+            <span className="w-px h-3 bg-slate-700 hidden md:block" />
+
             <span className="text-[11px] sm:text-xs font-mono text-slate-400 tabular-nums hidden sm:inline">
               DAY {timeState.dayCount}
             </span>
           </div>
+
+          {/* Currency Display (Drift Coins & Aether Essence) */}
+          <div className="bg-[#0c121d]/90 border border-slate-800/90 rounded-2xl px-2.5 sm:px-3 py-1.5 sm:py-2 shadow-xl flex items-center gap-2 sm:gap-3 font-mono text-xs">
+            <div className="flex items-center gap-1.5 text-amber-300 font-bold" title="Archipelago Drift Coins">
+              <Coins className="w-3.5 h-3.5 text-amber-400" />
+              <span className="tabular-nums">{wallet?.driftCoins ?? 75}</span>
+            </div>
+            <span className="w-px h-3 bg-slate-700 hidden sm:block" />
+            <div className="hidden sm:flex items-center gap-1.5 text-purple-300 font-bold" title="Celestial Aether Essence">
+              <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+              <span className="tabular-nums">{wallet?.aetherEssence ?? 0}</span>
+            </div>
+          </div>
+
+          {/* Save Status Flash Indicator */}
+          {saveStatus && (saveStatus.isSaving || (Date.now() - saveStatus.lastSaved < 3500)) && (
+            <div className="flex items-center gap-1 px-2.5 py-1.5 rounded-2xl bg-emerald-950/90 border border-emerald-500/50 text-[10px] sm:text-xs font-mono text-emerald-300 shadow-lg animate-pulse">
+              <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Saved</span>
+            </div>
+          )}
 
           {/* Dev Suite Trigger Button */}
           {onOpenDevPanel && (
@@ -421,7 +497,8 @@ export const HUD: React.FC<HUDProps> = ({
       )}
 
       {/* Bottom Area: Left Relic Tracker + Center Collapsible Dock */}
-      <div className="relative w-full flex flex-col items-center">
+      {!isMinimal && (
+        <div className="relative w-full flex flex-col items-center">
         {/* Bottom Left Relics Recovered Badge */}
         <div className="hidden sm:flex absolute left-0 bottom-2 pointer-events-auto bg-[#0c121d]/90 border border-slate-800/90 rounded-2xl px-3.5 py-2 shadow-xl items-center gap-2.5">
           <Sparkles className="w-4 h-4 text-emerald-400" />
@@ -586,6 +663,16 @@ export const HUD: React.FC<HUDProps> = ({
                 <span>Red Moon</span>
               </button>
 
+              {/* Melee Attack Button */}
+              <button
+                onClick={onAttack}
+                className="px-3 sm:px-3.5 py-1.5 rounded-xl bg-rose-950/90 hover:bg-rose-900 border border-rose-600/60 text-rose-300 text-xs font-mono font-bold transition-colors cursor-pointer flex items-center gap-1 active:scale-95 shadow-md"
+                title="Strike with weapon (F or Left-Click)"
+              >
+                <Sword className="w-3.5 h-3.5 text-rose-400" />
+                <span>Attack [F]</span>
+              </button>
+
               {/* Primary Action Button */}
               <button
                 onClick={onInteract}
@@ -598,6 +685,7 @@ export const HUD: React.FC<HUDProps> = ({
           </div>
         </div>
       </div>
+    )}
 
       {/* Mobile Touch Controls Layer */}
       {showTouchControls && (
@@ -658,39 +746,54 @@ export const HUD: React.FC<HUDProps> = ({
               <button
                 onTouchStart={(e) => {
                   e.stopPropagation();
-                  onTouchAction('sprint', true);
+                  triggerTouchAction('sprint', true);
                 }}
                 onTouchEnd={(e) => {
                   e.stopPropagation();
-                  onTouchAction('sprint', false);
+                  triggerTouchAction('sprint', false);
                 }}
-                className="w-12 h-12 rounded-full bg-amber-700/80 border border-amber-400/80 text-white font-mono text-[11px] font-bold flex items-center justify-center shadow-lg active:bg-amber-600"
+                className={`${touchBtnSize} rounded-full bg-amber-700/80 border border-amber-400/80 text-white font-mono font-bold flex items-center justify-center shadow-lg active:bg-amber-600`}
               >
                 RUN
               </button>
               <button
                 onTouchStart={(e) => {
                   e.stopPropagation();
-                  onTouchAction('jump', true);
+                  triggerTouchAction('jump', true);
                 }}
                 onTouchEnd={(e) => {
                   e.stopPropagation();
-                  onTouchAction('jump', false);
+                  triggerTouchAction('jump', false);
                 }}
-                className="w-12 h-12 rounded-full bg-cyan-700/80 border border-cyan-400/80 text-white font-mono text-[11px] font-bold flex items-center justify-center shadow-lg active:bg-cyan-600"
+                className={`${touchBtnSize} rounded-full bg-cyan-700/80 border border-cyan-400/80 text-white font-mono font-bold flex items-center justify-center shadow-lg active:bg-cyan-600`}
               >
                 JUMP
               </button>
               <button
                 onTouchStart={(e) => {
                   e.stopPropagation();
-                  onTouchAction('interact', true);
+                  triggerTouchAction('attack', true);
+                  onAttack?.();
                 }}
                 onTouchEnd={(e) => {
                   e.stopPropagation();
-                  onTouchAction('interact', false);
+                  triggerTouchAction('attack', false);
                 }}
-                className="w-12 h-12 rounded-full bg-emerald-700/80 border border-emerald-400/80 text-white font-mono text-[11px] font-bold flex items-center justify-center shadow-lg active:bg-emerald-600"
+                className={`${touchBtnSize} rounded-full bg-rose-700/80 border border-rose-400/80 text-white font-mono font-bold flex items-center justify-center shadow-lg active:bg-rose-600`}
+                title="Attack / Strike"
+              >
+                <Sword className="w-4 h-4 text-white" />
+              </button>
+              <button
+                onTouchStart={(e) => {
+                  e.stopPropagation();
+                  triggerTouchAction('interact', true);
+                }}
+                onTouchEnd={(e) => {
+                  e.stopPropagation();
+                  triggerTouchAction('interact', false);
+                }}
+                className={`${touchBtnSize} rounded-full bg-emerald-700/80 border border-emerald-400/80 text-white font-mono font-bold flex items-center justify-center shadow-lg active:bg-emerald-600`}
               >
                 [E]
               </button>

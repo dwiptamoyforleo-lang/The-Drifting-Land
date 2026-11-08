@@ -49,14 +49,16 @@ interface InventoryModalProps {
   inventory: InventorySystem;
   onUseItem: (itemId: string) => void;
   onClose: () => void;
+  initialTab?: 'inventory' | 'crafting' | 'equipment';
 }
 
 export const InventoryModal: React.FC<InventoryModalProps> = ({
   inventory,
   onUseItem,
   onClose,
+  initialTab = 'inventory',
 }) => {
-  const [activeTab, setActiveTab] = useState<'inventory' | 'crafting' | 'equipment'>('inventory');
+  const [activeTab, setActiveTab] = useState<'inventory' | 'crafting' | 'equipment'>(initialTab);
 
   const [slots, setSlots] = useState<InventorySlot[]>(() => inventory.getSlots());
   const [wallet, setWallet] = useState<PlayerWallet>(() => ({ ...inventory.wallet }));

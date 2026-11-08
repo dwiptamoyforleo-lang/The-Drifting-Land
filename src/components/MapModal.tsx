@@ -22,8 +22,10 @@ import {
 } from 'lucide-react';
 import { ShardRelic, Checkpoint, QuestDefinition, QuestProgress } from '../types/game';
 import { DISCOVERIES_CATALOG } from '../data/discoveries';
+import { REGIONS } from '../data/regions';
 
 interface MapModalProps {
+  regionId?: string;
   playerPos: [number, number, number];
   playerYaw: number;
   relics: ShardRelic[];
@@ -35,6 +37,7 @@ interface MapModalProps {
 }
 
 export const MapModal: React.FC<MapModalProps> = ({
+  regionId = 'verdant_reach',
   playerPos,
   playerYaw,
   relics,
@@ -115,7 +118,7 @@ export const MapModal: React.FC<MapModalProps> = ({
             </div>
             <div>
               <h2 className="text-base sm:text-lg font-bold font-mono tracking-wide text-white">
-                Archipelago Regional Chart
+                Archipelago Chart · <span className="text-emerald-400">{REGIONS[regionId]?.name || 'The Verdant Reach'}</span>
               </h2>
               <div className="flex items-center gap-3 text-xs font-mono text-slate-400">
                 <span>

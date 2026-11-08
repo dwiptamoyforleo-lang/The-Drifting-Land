@@ -6,7 +6,21 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { GameMode, SaveData, GameSettings, ShardRelic, CrimsonWardenState, WeatherType, EquippedGear, QuestDefinition, QuestProgress, TraderCatalog } from './types/game';
+import {
+  GameMode,
+  SaveData,
+  GameSettings,
+  ShardRelic,
+  ActiveBossState,
+  CrimsonWardenState,
+  WeatherType,
+  EquippedGear,
+  QuestDefinition,
+  QuestProgress,
+  TraderCatalog,
+  PlayerWallet,
+  Checkpoint,
+} from './types/game';
 import { StorageService, createInitialSave } from './services/storage';
 import { GameEngine } from './engine/gameLoop';
 import { GameCanvas } from './components/GameCanvas';
@@ -22,6 +36,13 @@ import { TradeModal } from './components/TradeModal';
 import { NotificationToast } from './components/NotificationToast';
 import { DiagnosticScreen } from './components/DiagnosticScreen';
 import { DevPanel } from './components/DevPanel';
+import { DimensionTransitionScreen } from './components/DimensionTransitionScreen';
+import { PortalModal } from './components/PortalModal';
+import { LoadingScreen } from './components/LoadingScreen';
+import { RespawnModal } from './components/RespawnModal';
+import { LevelSelectModal } from './components/LevelSelectModal';
+import { CollectionsModal } from './components/CollectionsModal';
+import { PortalDefinition, PortalUnlockCheck } from './data/portals';
 import { AudioService } from './services/audio';
 import { getTraderCatalog } from './data/traders';
 
@@ -29,17 +50,24 @@ export default function App() {
   const [mode, setMode] = useState<GameMode>('TITLE');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isInitializing, setIsInitializing] = useState<boolean>(true);
+  const [initPhase, setInitPhase] = useState<string>('Verifying WebGL context & shaders...');
+  const [initProgress, setInitProgress] = useState<number>(15);
   const [cameraLabel, setCameraLabel] = useState<string>('THIRD PERSON');
   const [hotbar, setHotbar] = useState<(string | null)[]>([null, null, null, null, null, null]);
   const [equipped, setEquipped] = useState<EquippedGear>({ head: null, body: null, tool: null, accessory: null });
   const [trackedQuest, setTrackedQuest] = useState<{ def: QuestDefinition; progress: QuestProgress; activeObjectiveText: string } | null>(null);
   const [isDevPanelOpen, setIsDevPanelOpen] = useState<boolean>(false);
-  const [bossState, setBossState] = useState<CrimsonWardenState | null>(null);
+  const [bossState, setBossState] = useState<ActiveBossState | null>(null);
   const [activeTraderCatalog, setActiveTraderCatalog] = useState<TraderCatalog | null>(null);
+  const [portalModalData, setPortalModalData] = useState<{ portal: PortalDefinition; check: PortalUnlockCheck } | null>(null);
+  const [transitionRegionId, setTransitionRegionId] = useState<string | null>(null);
+  const [activeCheckpointForRespawn, setActiveCheckpointForRespawn] = useState<Checkpoint | null>(null);
 
-  // Persistent save and settings
+  // Persistent save, wallet, and settings
   const [activeSave, setActiveSave] = useState<SaveData>(() => StorageService.loadSave());
   const [settings, setSettings] = useState<GameSettings>(() => StorageService.loadSettings());
+  const [wallet, setWallet] = useState<PlayerWallet>(() => activeSave.wallet || { driftCoins: 75, aetherEssence: 0 });
+  const [saveStatus, setSaveStatus] = useState<{ lastSaved: number; isSaving?: boolean }>({ lastSaved: 0 });
   const [hasExistingSave, setHasExistingSave] = useState<boolean>(() => StorageService.hasSave());
 
   // In-game dynamic state callbacks
@@ -172,17 +200,33 @@ export default function App() {
           onDiscoveriesUpdate: (updatedDiscoveries) => {
             setActiveSave((prev) => ({ ...prev, discoveries: [...updatedDiscoveries] }));
           },
+          onInspectPortal: (portal, check) => {
+            setPortalModalData({ portal, check });
+          },
+          onStartDimensionTransition: (regionId) => {
+            setTransitionRegionId(regionId);
+          },
+          onPlayerDefeated: (cp) => {
+            setActiveCheckpointForRespawn(cp);
+            setMode('RESPAWN');
+          },
         },
         currentSave
       );
 
-      await engine.init();
+      await engine.init((phase, percent) => {
+        setInitPhase(phase);
+        setInitProgress(percent);
+      });
       engineRef.current = engine;
-      // Subscribe to hotbar and equipment changes
-      engine.inventory.subscribe((_slots, _wallet, newHotbar, newEquipped) => {
+
+      // Subscribe to hotbar, wallet, and equipment changes
+      engine.inventory.subscribe((_slots, newWallet, newHotbar, newEquipped) => {
+        setWallet({ ...newWallet });
         setHotbar([...newHotbar]);
         setEquipped({ ...newEquipped });
       });
+      setWallet({ ...engine.inventory.wallet });
       setHotbar([...engine.inventory.hotbar]);
       setEquipped({ ...engine.inventory.equipped });
 
@@ -212,11 +256,15 @@ export default function App() {
   }, []);
 
   // Mode transitions
-  const handleStartGame = (isNew: boolean) => {
+  const handleStartGame = (isNew: boolean, customRegionId?: string) => {
     if (isNew) {
       const cleanSave = createInitialSave();
       StorageService.saveGame(cleanSave);
       setActiveSave(cleanSave);
+      setWallet({ ...cleanSave.wallet });
+    }
+    if (customRegionId && customRegionId !== activeSave.regionId) {
+      engineRef.current?.switchDestination(customRegionId);
     }
     setMode('PLAYING');
     engineRef.current?.setMode('PLAYING');
@@ -226,7 +274,17 @@ export default function App() {
     if (mode === 'PLAYING') {
       setMode('PAUSED');
       engineRef.current?.setMode('PAUSED');
-    } else if (mode === 'PAUSED' || mode === 'INVENTORY' || mode === 'QUESTS' || mode === 'MAP' || mode === 'TRADE') {
+    } else if (
+      mode === 'PAUSED' ||
+      mode === 'INVENTORY' ||
+      mode === 'CRAFTING' ||
+      mode === 'QUESTS' ||
+      mode === 'ACHIEVEMENTS' ||
+      mode === 'MAP' ||
+      mode === 'LEVEL_SELECT' ||
+      mode === 'COLLECTIONS' ||
+      mode === 'TRADE'
+    ) {
       setMode('PLAYING');
       setActiveTraderCatalog(null);
       engineRef.current?.setMode('PLAYING');
@@ -243,7 +301,10 @@ export default function App() {
 
   const handleSaveProgress = () => {
     engineRef.current?.persistSave();
+    const updated = StorageService.loadSave();
+    setActiveSave(updated);
     setHasExistingSave(true);
+    setSaveStatus({ lastSaved: Date.now(), isSaving: false });
   };
 
   const handleToggleSound = () => {
@@ -312,15 +373,9 @@ export default function App() {
   const handleUpdateSettings = (newSettings: GameSettings) => {
     setSettings(newSettings);
     StorageService.saveSettings(newSettings);
-    if (newSettings.cameraMode && engineRef.current) {
-      engineRef.current.setCameraMode(newSettings.cameraMode);
+    engineRef.current?.updateSettings(newSettings);
+    if (engineRef.current) {
       setCameraLabel(engineRef.current.getCameraLabel());
-    }
-    if (newSettings.cameraDistance !== undefined && engineRef.current) {
-      engineRef.current.setCameraDistance(newSettings.cameraDistance);
-    }
-    if (newSettings.cameraSensitivity !== undefined && engineRef.current) {
-      engineRef.current.setCameraSensitivity(newSettings.cameraSensitivity);
     }
   };
 
@@ -334,11 +389,15 @@ export default function App() {
     engineRef.current?.handleInteract();
   };
 
+  const handleAttack = () => {
+    engineRef.current?.handleAttack();
+  };
+
   const handleJoystickMove = (x: number, y: number) => {
     engineRef.current?.input.setJoystick(x, y);
   };
 
-  const handleTouchAction = (action: 'jump' | 'dash' | 'interact' | 'sprint', active: boolean) => {
+  const handleTouchAction = (action: 'jump' | 'dash' | 'interact' | 'sprint' | 'attack', active: boolean) => {
     engineRef.current?.input.setTouchAction(action, active);
   };
 
@@ -361,23 +420,27 @@ export default function App() {
       {/* Global In-Game Notification Toasts */}
       <NotificationToast />
 
-      {/* Loading overlay during initial shader compile */}
+      {/* Authentic Loading Screen with genuine step progress */}
       {isInitializing && (
-        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#0a0f16] text-slate-200">
-          <div className="w-12 h-12 rounded-full border-2 border-emerald-500/20 border-t-emerald-400 animate-spin mb-4" />
-          <h2 className="text-sm font-mono tracking-widest uppercase text-emerald-400">
-            Generating The Verdant Reach
-          </h2>
-          <p className="text-xs text-slate-500 font-mono mt-1">
-            Synthesizing procedural archipelago...
-          </p>
-        </div>
+        <LoadingScreen
+          regionId={activeSave.regionId}
+          initPhase={initPhase}
+          progressPercent={initProgress}
+          trackedQuest={trackedQuest}
+          errorMessage={errorMessage}
+          onRetry={() => {
+            if (containerRef.current) {
+              initEngine(containerRef.current);
+            }
+          }}
+        />
       )}
 
-      {/* Screen: Title Screen */}
+      {/* Screen: Title Screen / Main Menu */}
       {!isInitializing && mode === 'TITLE' && (
         <TitleScreen
           hasExistingSave={hasExistingSave}
+          activeSave={activeSave}
           onStartGame={handleStartGame}
           onOpenSettings={() => setMode('SETTINGS')}
           soundEnabled={settings.soundEnabled}
@@ -386,41 +449,57 @@ export default function App() {
       )}
 
       {/* Screen: Playing HUD */}
-      {!isInitializing && (mode === 'PLAYING' || mode === 'PAUSED' || mode === 'INVENTORY' || mode === 'QUESTS' || mode === 'MAP') && (
-        <HUD
-          stats={stats}
-          timeState={timeState}
-          bossState={bossState}
-          weatherName={weatherName}
-          relics={relics}
-          beaconActivated={beaconActivated}
-          interactionPrompt={interactionPrompt}
-          cameraLabel={cameraLabel}
-          trackedQuest={trackedQuest}
-          hotbar={hotbar}
-          equipped={equipped}
-          onUseHotbarSlot={handleUseHotbarSlot}
-          onSwitchCamera={handleSwitchCamera}
-          onOpenMap={handleToggleMap}
-          onInteract={handleInteract}
-          onOpenInventory={() => {
-            setMode('INVENTORY');
-            engineRef.current?.setMode('INVENTORY');
-          }}
-          onOpenQuests={() => {
-            setMode('QUESTS');
-            engineRef.current?.setMode('QUESTS');
-          }}
-          onTogglePause={handleTogglePause}
-          onToggleSound={handleToggleSound}
-          soundEnabled={settings.soundEnabled}
-          onToggleRedMoon={handleToggleRedMoon}
-          onOpenDevPanel={() => setIsDevPanelOpen(true)}
-          showTouchControls={isTouchDevice || settings.touchControls}
-          onJoystickMove={handleJoystickMove}
-          onTouchAction={handleTouchAction}
-        />
-      )}
+      {!isInitializing &&
+        (mode === 'PLAYING' ||
+          mode === 'PAUSED' ||
+          mode === 'INVENTORY' ||
+          mode === 'CRAFTING' ||
+          mode === 'QUESTS' ||
+          mode === 'ACHIEVEMENTS' ||
+          mode === 'MAP' ||
+          mode === 'LEVEL_SELECT' ||
+          mode === 'COLLECTIONS') && (
+          <HUD
+            regionId={activeSave.regionId}
+            wallet={wallet}
+            saveStatus={saveStatus}
+            hudVisibility={settings.hudVisibility}
+            mobileButtonSize={settings.mobileButtonSize}
+            mobileHaptics={settings.mobileHaptics}
+            stats={stats}
+            timeState={timeState}
+            bossState={bossState}
+            weatherName={weatherName}
+            relics={relics}
+            beaconActivated={beaconActivated}
+            interactionPrompt={interactionPrompt}
+            cameraLabel={cameraLabel}
+            trackedQuest={trackedQuest}
+            hotbar={hotbar}
+            equipped={equipped}
+            onUseHotbarSlot={handleUseHotbarSlot}
+            onSwitchCamera={handleSwitchCamera}
+            onOpenMap={handleToggleMap}
+            onInteract={handleInteract}
+            onAttack={handleAttack}
+            onOpenInventory={() => {
+              setMode('INVENTORY');
+              engineRef.current?.setMode('INVENTORY');
+            }}
+            onOpenQuests={() => {
+              setMode('QUESTS');
+              engineRef.current?.setMode('QUESTS');
+            }}
+            onTogglePause={handleTogglePause}
+            onToggleSound={handleToggleSound}
+            soundEnabled={settings.soundEnabled}
+            onToggleRedMoon={handleToggleRedMoon}
+            onOpenDevPanel={() => setIsDevPanelOpen(true)}
+            showTouchControls={isTouchDevice || settings.touchControls}
+            onJoystickMove={handleJoystickMove}
+            onTouchAction={handleTouchAction}
+          />
+        )}
 
       {/* Developer-Only Testing Suite (Separate from player settings) */}
       <DevPanel
@@ -432,6 +511,7 @@ export default function App() {
         onSetWeather={handleDevSetWeather}
         onResetCooldown={handleDevResetCooldown}
         onTeleport={handleDevTeleport}
+        onSwitchDestination={(regionId) => engineRef.current?.switchDestination(regionId)}
         isRedMoon={timeState.isRedMoon}
         clockTime={timeState.clockTime}
         dayCount={timeState.dayCount}
@@ -458,6 +538,7 @@ export default function App() {
       {/* Modal: Regional Navigation Chart & Map */}
       {mode === 'MAP' && engineRef.current && (
         <MapModal
+          regionId={activeSave.regionId}
           playerPos={engineRef.current.getPlayerPosition()}
           playerYaw={engineRef.current.getPlayerFacingAngle()}
           relics={relics.shards}
@@ -472,10 +553,11 @@ export default function App() {
         />
       )}
 
-      {/* Modal: Inventory Pouch */}
-      {mode === 'INVENTORY' && engineRef.current && (
+      {/* Modal: Inventory Pouch & Crafting Station */}
+      {(mode === 'INVENTORY' || mode === 'CRAFTING') && engineRef.current && (
         <InventoryModal
           inventory={engineRef.current.inventory}
+          initialTab={mode === 'CRAFTING' ? 'crafting' : 'inventory'}
           onUseItem={handleUseItem}
           onClose={() => {
             setMode('PLAYING');
@@ -484,15 +566,58 @@ export default function App() {
         />
       )}
 
-      {/* Modal: Quest Journal */}
-      {mode === 'QUESTS' && engineRef.current && (
+      {/* Modal: Quest Journal & Achievements Codex */}
+      {(mode === 'QUESTS' || mode === 'ACHIEVEMENTS') && engineRef.current && (
         <QuestJournalModal
           questSystem={engineRef.current.quests}
           achievementSystem={engineRef.current.achievements}
+          initialTab={mode === 'ACHIEVEMENTS' ? 'achievements' : 'quests'}
           discoveries={activeSave.discoveries}
           onClose={() => {
             setMode('PLAYING');
             engineRef.current?.setMode('PLAYING');
+          }}
+        />
+      )}
+
+      {/* Modal: Level & Destination Selection */}
+      {mode === 'LEVEL_SELECT' && (
+        <LevelSelectModal
+          currentRegionId={activeSave.regionId}
+          unlockedRegionIds={Object.keys(activeSave.dimensionProgress || {})}
+          explorationRank={activeSave.explorationRank}
+          onSelectDestination={(id) => {
+            engineRef.current?.switchDestination(id);
+            setMode('PLAYING');
+          }}
+          onClose={() => {
+            setMode('PLAYING');
+            engineRef.current?.setMode('PLAYING');
+          }}
+        />
+      )}
+
+      {/* Modal: Collections & Archives Compendium */}
+      {mode === 'COLLECTIONS' && (
+        <CollectionsModal
+          shards={relics.shards}
+          discoveries={activeSave.discoveries}
+          defeatedBosses={activeSave.defeatedBosses}
+          onClose={() => {
+            setMode('PLAYING');
+            engineRef.current?.setMode('PLAYING');
+          }}
+        />
+      )}
+
+      {/* Modal: Controlled Defeat Respawn */}
+      {mode === 'RESPAWN' && (
+        <RespawnModal
+          activeCheckpoint={activeCheckpointForRespawn}
+          onRespawn={(useStarting) => {
+            engineRef.current?.respawnPlayer(useStarting);
+            setActiveCheckpointForRespawn(null);
+            setMode('PLAYING');
           }}
         />
       )}
@@ -507,6 +632,11 @@ export default function App() {
           onSave={handleSaveProgress}
           onOpenSettings={() => setMode('SETTINGS')}
           onReturnToTitle={handleReturnToTitle}
+          onOpenLevels={() => setMode('LEVEL_SELECT')}
+          onOpenQuests={() => setMode('QUESTS')}
+          onOpenInventory={() => setMode('INVENTORY')}
+          onOpenCollections={() => setMode('COLLECTIONS')}
+          regionName={activeSave.regionId}
           shardCount={relics.collectedCount}
           totalShards={relics.totalCount}
         />
@@ -527,6 +657,28 @@ export default function App() {
             }
           }}
           onReloadSave={handleReloadSave}
+        />
+      )}
+
+      {/* Modal: Portal Inspection & Unlock Checklist */}
+      {portalModalData && (
+        <PortalModal
+          portal={portalModalData.portal}
+          check={portalModalData.check}
+          onTraverse={() => {
+            const dest = portalModalData.portal.destinationRegionId;
+            setPortalModalData(null);
+            engineRef.current?.switchDestination(dest);
+          }}
+          onClose={() => setPortalModalData(null)}
+        />
+      )}
+
+      {/* Atmospheric Dimension Transition Warp Screen */}
+      {transitionRegionId && (
+        <DimensionTransitionScreen
+          destinationRegionId={transitionRegionId}
+          onComplete={() => setTransitionRegionId(null)}
         />
       )}
 

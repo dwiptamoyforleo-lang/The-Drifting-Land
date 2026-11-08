@@ -16,6 +16,8 @@ export const DEFAULT_SETTINGS: GameSettings = {
   shadows: true,
   soundEnabled: true,
   masterVolume: 0.7,
+  sfxVolume: 0.8,
+  musicVolume: 0.7,
   invertY: false,
   touchControls: false,
   cameraMode: 'THIRD_PERSON',
@@ -23,6 +25,9 @@ export const DEFAULT_SETTINGS: GameSettings = {
   cameraDistance: 7.5,
   particleLimit: 600,
   dayDurationMinutes: 20,
+  hudVisibility: 'full',
+  mobileButtonSize: 'normal',
+  mobileHaptics: true,
 };
 
 export const DEFAULT_STATS: PlayerStats = {
@@ -93,6 +98,22 @@ export function createInitialSave(): SaveData {
     achievements: {},
     claimedQuestRewards: [],
     discoveredNpcs: ['npc_elder_soren'],
+    defeatedBosses: [],
+    claimedBossRewards: [],
+    dimensionProgress: {
+      verdant_reach: {
+        unlocked: true,
+        discovered: true,
+        activeCheckpointId: 'cp_beacon_plaza',
+        activatedCheckpoints: ['cp_beacon_plaza'],
+        firstVisitedAt: Date.now(),
+      },
+      shattered_highlands: { unlocked: false, discovered: false, activatedCheckpoints: ['cp_highlands_ascent'] },
+      ashen_expanse: { unlocked: false, discovered: false, activatedCheckpoints: ['cp_ashen_caldera'] },
+      sunken_archive: { unlocked: false, discovered: false, activatedCheckpoints: ['cp_archive_vestibule'] },
+      moonveil_wilds: { unlocked: false, discovered: false, activatedCheckpoints: ['cp_moonveil_grotto'] },
+      rift_frontier: { unlocked: false, discovered: false, activatedCheckpoints: ['cp_rift_anomaly'] },
+    },
     settlementProgress: {
       hearthRekindled: true,
       spokeWithElder: false,
@@ -318,6 +339,11 @@ export class StorageService {
       achievements: typeof raw.achievements === 'object' && raw.achievements !== null ? raw.achievements : {},
       claimedQuestRewards: Array.isArray(raw.claimedQuestRewards) ? raw.claimedQuestRewards : [],
       discoveredNpcs: Array.isArray(raw.discoveredNpcs) ? raw.discoveredNpcs : fallback.discoveredNpcs,
+      defeatedBosses: Array.isArray(raw.defeatedBosses) ? raw.defeatedBosses : [],
+      claimedBossRewards: Array.isArray(raw.claimedBossRewards) ? raw.claimedBossRewards : [],
+      dimensionProgress: typeof raw.dimensionProgress === 'object' && raw.dimensionProgress !== null
+        ? { ...fallback.dimensionProgress, ...raw.dimensionProgress }
+        : fallback.dimensionProgress,
       settlementProgress: typeof raw.settlementProgress === 'object' && raw.settlementProgress !== null ? raw.settlementProgress : fallback.settlementProgress,
     };
   }

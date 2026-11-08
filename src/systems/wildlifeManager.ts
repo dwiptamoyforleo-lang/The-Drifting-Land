@@ -671,6 +671,10 @@ export class WildlifeManager {
     return false;
   }
 
+  public clear(): void {
+    this.dispose();
+  }
+
   public dispose(): void {
     while (this.group.children.length > 0) {
       const child = this.group.children[0];

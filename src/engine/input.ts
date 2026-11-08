@@ -30,6 +30,7 @@ export class InputManager {
   private onToggleQuestsCallback?: () => void;
   private onToggleMapCallback?: () => void;
   private onSwitchCameraCallback?: () => void;
+  private onAttackCallback?: () => void;
 
   constructor(
     onPause?: () => void,
@@ -37,7 +38,8 @@ export class InputManager {
     onToggleInventory?: () => void,
     onToggleQuests?: () => void,
     onToggleMap?: () => void,
-    onSwitchCamera?: () => void
+    onSwitchCamera?: () => void,
+    onAttack?: () => void
   ) {
     this.onPauseCallback = onPause;
     this.onInteractCallback = onInteract;
@@ -45,6 +47,7 @@ export class InputManager {
     this.onToggleQuestsCallback = onToggleQuests;
     this.onToggleMapCallback = onToggleMap;
     this.onSwitchCameraCallback = onSwitchCamera;
+    this.onAttackCallback = onAttack;
 
     this.state = {
       forward: false,
@@ -55,6 +58,7 @@ export class InputManager {
       dash: false,
       sprint: false,
       interact: false,
+      attack: false,
       pause: false,
       toggleInventory: false,
       toggleQuests: false,
@@ -116,6 +120,10 @@ export class InputManager {
         this.state.interact = true;
         this.onInteractCallback?.();
         break;
+      case 'KeyF':
+        this.state.attack = true;
+        this.onAttackCallback?.();
+        break;
       case 'KeyV':
         this.state.switchCamera = true;
         this.onSwitchCameraCallback?.();
@@ -173,8 +181,19 @@ export class InputManager {
       case 'KeyE':
         this.state.interact = false;
         break;
+      case 'KeyF':
+        this.state.attack = false;
+        break;
     }
   };
+
+  public triggerAttack(): void {
+    this.state.attack = true;
+    this.onAttackCallback?.();
+    setTimeout(() => {
+      this.state.attack = false;
+    }, 120);
+  }
 
   private handleBlur = (): void => {
     this.resetInputs();
@@ -219,6 +238,7 @@ export class InputManager {
     this.state.dash = false;
     this.state.sprint = false;
     this.state.interact = false;
+    this.state.attack = false;
     this.state.toggleInventory = false;
     this.state.toggleQuests = false;
     this.state.toggleMap = false;
@@ -287,7 +307,7 @@ export class InputManager {
 
   // Touch action triggers
   public setTouchAction = (
-    action: 'jump' | 'sprint' | 'dash' | 'interact' | 'camera' | 'map',
+    action: 'jump' | 'sprint' | 'dash' | 'interact' | 'attack' | 'camera' | 'map',
     active: boolean
   ): void => {
     if (action === 'jump') this.state.jump = active;
@@ -299,6 +319,10 @@ export class InputManager {
     if (action === 'interact') {
       this.state.interact = active;
       if (active) this.onInteractCallback?.();
+    }
+    if (action === 'attack') {
+      this.state.attack = active;
+      if (active) this.onAttackCallback?.();
     }
     if (action === 'camera' && active) {
       this.onSwitchCameraCallback?.();

@@ -3,7 +3,22 @@
  * Comprehensive data contracts for all gameplay, progression, rendering, and persistence systems.
  */
 
-export type GameMode = 'TITLE' | 'PLAYING' | 'PAUSED' | 'SETTINGS' | 'INVENTORY' | 'QUESTS' | 'MAP' | 'TRADE' | 'ERROR';
+export type GameMode =
+  | 'TITLE'
+  | 'PLAYING'
+  | 'PAUSED'
+  | 'SETTINGS'
+  | 'INVENTORY'
+  | 'CRAFTING'
+  | 'QUESTS'
+  | 'ACHIEVEMENTS'
+  | 'COLLECTIONS'
+  | 'MAP'
+  | 'TRADE'
+  | 'SHOP'
+  | 'LEVEL_SELECT'
+  | 'RESPAWN'
+  | 'ERROR';
 
 export type CameraMode = 'THIRD_PERSON' | 'FIRST_PERSON' | 'SECOND_PERSON';
 
@@ -19,7 +34,9 @@ export type WeatherType =
   | 'DIMENSIONAL_DISTURBANCE'
   | 'RED_ECLIPSE';
 
-export type ItemRarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary';
+export type ItemRarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary' | 'event-exclusive' | 'event_exclusive';
+
+export type LootRarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary' | 'event-exclusive';
 
 export type ItemCategory =
   | 'resource'
@@ -186,6 +203,16 @@ export interface Checkpoint {
   discovered: boolean;
 }
 
+export interface DimensionUnlockRequirement {
+  description: string;
+  minExplorationRank?: number;
+  requiredQuestId?: string;
+  requiredBeaconActivated?: boolean;
+  requiredItems?: { itemId: string; name: string; quantity: number }[];
+  requiredDiscoveriesCount?: number;
+  requiredBossDefeated?: string;
+}
+
 export interface RegionDefinition {
   id: string;
   dimensionId: string;
@@ -200,6 +227,9 @@ export interface RegionDefinition {
   spawnPoint: [number, number, number];
   weatherProfile: WeatherType[];
   discoveryLore: string;
+  gravityModifier?: number;
+  unlockedByDefault?: boolean;
+  unlockRequirement?: DimensionUnlockRequirement;
 }
 
 export interface DimensionDefinition {
@@ -209,6 +239,16 @@ export interface DimensionDefinition {
   gravityModifier: number;
   skyVoidColor: number;
   regions: string[];
+  themeColor?: string;
+  badge?: string;
+}
+
+export interface DimensionProgress {
+  unlocked: boolean;
+  discovered: boolean;
+  activeCheckpointId?: string;
+  activatedCheckpoints: string[];
+  firstVisitedAt?: number;
 }
 
 export type QuestCategory =
@@ -355,7 +395,18 @@ export interface RedMoonSaveState {
   forceTriggered?: boolean;
 }
 
-export interface CrimsonWardenState {
+export type BossId =
+  | 'rootbound_guardian'
+  | 'ash_colossus'
+  | 'storm_sentinel'
+  | 'archive_keeper'
+  | 'rift_sovereign'
+  | 'crimson_warden';
+
+export interface ActiveBossState {
+  id: BossId;
+  name: string;
+  subtitle: string;
   active: boolean;
   health: number;
   maxHealth: number;
@@ -371,12 +422,18 @@ export interface CrimsonWardenState {
   defeatedMessage?: string;
 }
 
+export interface CrimsonWardenState extends ActiveBossState {
+  id: 'crimson_warden';
+}
+
 export interface GameSettings {
   graphicsQuality: 'high' | 'medium' | 'low';
   fov: number;
   shadows: boolean;
   soundEnabled: boolean;
   masterVolume: number;
+  sfxVolume: number;
+  musicVolume: number;
   invertY: boolean;
   touchControls: boolean;
   cameraMode: CameraMode;
@@ -384,6 +441,9 @@ export interface GameSettings {
   cameraDistance: number;
   particleLimit: number; // Low=250, Medium=600, High=1200
   dayDurationMinutes: number; // default 20
+  hudVisibility: 'full' | 'compact' | 'minimal' | 'hidden';
+  mobileButtonSize: 'normal' | 'large';
+  mobileHaptics: boolean;
 }
 
 export interface NotificationItem {
@@ -492,6 +552,9 @@ export interface SaveData {
   achievements: Record<string, { unlocked: boolean; timestamp: number }>;
   claimedQuestRewards: string[];
   discoveredNpcs?: string[];
+  defeatedBosses?: string[];
+  claimedBossRewards?: string[];
+  dimensionProgress?: Record<string, DimensionProgress>;
   settlementProgress?: {
     hearthRekindled: boolean;
     spokeWithElder?: boolean;
@@ -508,6 +571,7 @@ export interface InputState {
   dash: boolean;
   sprint: boolean;
   interact: boolean;
+  attack: boolean;
   pause: boolean;
   toggleInventory: boolean;
   toggleQuests: boolean;

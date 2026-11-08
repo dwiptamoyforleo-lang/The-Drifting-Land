@@ -20,7 +20,10 @@ import {
   ShardRelic,
   CameraMode,
   CrimsonWardenState,
+  ActiveBossState,
   WeatherType,
+  Checkpoint,
+  GameSettings,
 } from '../types/game';
 import { RenderPipeline, RendererBundle } from './renderer';
 import { WorldGenerator, WorldBundle } from './world';
@@ -42,7 +45,12 @@ import { StructuresManager } from './structures';
 import { InteractionSystem } from '../systems/interactionSystem';
 import { FloraManager, FloraNode } from './floraManager';
 import { WildlifeManager, CreatureInstance } from '../systems/wildlifeManager';
+import { CombatEnemyManager } from '../systems/combatEnemyManager';
+import { BossManager } from '../systems/bossManager';
 import { getContextualDialogue, DialogueContext } from '../data/npcDialogue';
+import { PortalManager } from '../systems/portalManager';
+import { PortalDefinition, checkPortalUnlock, PortalUnlockCheck } from '../data/portals';
+import { REGIONS, DIMENSIONS, CHECKPOINTS } from '../data/regions';
 
 export interface EngineUiCallbacks {
   onStatsUpdate: (stats: {
@@ -79,9 +87,12 @@ export interface EngineUiCallbacks {
   onToggleMapModal?: () => void;
   onCameraModeChange?: (mode: CameraMode, label: string) => void;
   onWeatherUpdate?: (weather: string) => void;
-  onBossStateUpdate?: (boss: CrimsonWardenState | null) => void;
+  onBossStateUpdate?: (boss: ActiveBossState | null) => void;
   onFpsUpdate?: (fps: number) => void;
   onDiscoveriesUpdate?: (discoveries: string[]) => void;
+  onInspectPortal?: (portal: PortalDefinition, check: PortalUnlockCheck) => void;
+  onStartDimensionTransition?: (destinationRegionId: string) => void;
+  onPlayerDefeated?: (checkpoint: Checkpoint | null) => void;
 }
 
 export class GameEngine {
@@ -96,8 +107,12 @@ export class GameEngine {
   public interactions: InteractionSystem | null = null;
   public flora: FloraManager | null = null;
   public wildlife: WildlifeManager | null = null;
+  public combatEnemies: CombatEnemyManager | null = null;
+  public bossManager: BossManager | null = null;
+  public portals: PortalManager | null = null;
   private nearbyFlora: { node: FloraNode; prompt: string; canHarvest: boolean } | null = null;
   private nearbyCreature: CreatureInstance | null = null;
+  private nearbyPortal: { portal: PortalDefinition; distance: number } | null = null;
   public inventory: InventorySystem;
   public quests: QuestSystem;
   public achievements: AchievementSystem;
@@ -167,31 +182,40 @@ export class GameEngine {
       () => this.uiCallbacks.onToggleInventoryModal?.(),
       () => this.uiCallbacks.onToggleQuestsModal?.(),
       () => this.uiCallbacks.onToggleMapModal?.(),
-      () => this.cycleCameraMode()
+      () => this.cycleCameraMode(),
+      () => this.handleAttack()
     );
   }
 
   /**
    * Complete initialization sequence
    */
-  async init(): Promise<boolean> {
+  async init(onProgress?: (phase: string, percent: number) => void): Promise<boolean> {
     try {
       // 1. Check WebGL support
+      onProgress?.('Verifying WebGL context & shaders...', 15);
       if (!RenderPipeline.isWebGLAvailable()) {
         throw new Error('WebGL is not supported by your browser or hardware.');
       }
 
       // 2. Initialize Three.js pipeline
+      onProgress?.('Compiling Three.js render pipeline...', 35);
       this.bundle = RenderPipeline.init(this.container, this.activeSave.settings.shadows);
 
-      // 3. Build The Verdant Reach world
+      // 3. Build current destination world
+      onProgress?.('Synthesizing floating archipelago & terrain...', 60);
       const maxAnisotropy = this.bundle.isSoftwareGl ? 1 : this.bundle.renderer.capabilities.getMaxAnisotropy();
-      this.world = WorldGenerator.generate(maxAnisotropy, this.bundle.isSoftwareGl);
+      const currentRegion = this.activeSave.regionId || 'verdant_reach';
+      this.world = WorldGenerator.generate(currentRegion, maxAnisotropy, this.bundle.isSoftwareGl);
       this.bundle.scene.add(this.world.group);
 
       // 4. Build Player Explorer
+      onProgress?.('Populating flora, wildlife & sanctuaries...', 80);
       this.player = new PlayerController(this.activeSave.playerPosition, this.bundle.isSoftwareGl);
       this.player.stats = { ...this.activeSave.playerStats };
+      const regionDef = REGIONS[currentRegion] || REGIONS.verdant_reach;
+      const dimDef = DIMENSIONS[regionDef.dimensionId] || DIMENSIONS.the_living_reach;
+      this.player.gravityModifier = regionDef.gravityModifier ?? dimDef.gravityModifier;
       this.bundle.scene.add(this.player.group);
 
       // 5. Build Camera Manager with settings
@@ -234,6 +258,10 @@ export class GameEngine {
         }
       );
       this.wildlife.populate();
+
+      // 12. Build Dimension Portals (Outbound gateways & return conduits)
+      this.portals = new PortalManager(this.bundle.scene, this.bundle.isSoftwareGl);
+      this.portals.populateForRegion(currentRegion, (x, z) => this.world!.getTerrainHeight(x, z));
 
       // Equipment passive perks listener
       this.inventory.subscribe((_slots, _wallet, _hotbar, _equipped) => {
@@ -308,21 +336,46 @@ export class GameEngine {
       // 8. Initialize Weather particles
       this.weather.initScene(this.bundle.scene);
 
-      // 9. Initialize Crimson Warden Boss Encounter
+      // 9. Initialize BossManager (6 distinct bosses with data-driven loot & anti-exploit)
+      this.bossManager = new BossManager(
+        this.bundle.scene,
+        this.world.getTerrainHeight,
+        this.inventory,
+        this.quests,
+        this.achievements,
+        this.activeSave.defeatedBosses || [],
+        this.activeSave.claimedBossRewards || [],
+        this.bundle.isSoftwareGl,
+        (bossState) => {
+          this.uiCallbacks.onBossStateUpdate?.(bossState);
+        },
+        (damage) => {
+          this.damagePlayer(damage);
+        }
+      );
+
+      // 10. Initialize 5 Hostile Enemy Archetypes
+      this.combatEnemies = new CombatEnemyManager(
+        this.bundle.scene,
+        this.world.getTerrainHeight,
+        this.inventory,
+        this.quests,
+        this.achievements,
+        this.bundle.isSoftwareGl
+      );
+
+      // 10B. Crimson Warden encounter
       this.crimsonWarden = new CrimsonWardenEncounter(
         this.bundle.scene,
         this.world.getTerrainHeight,
         {
           onBossStateChange: (bossState) => {
-            this.uiCallbacks.onBossStateUpdate?.(bossState);
+            if (!this.bossManager?.activeBossId) {
+              this.uiCallbacks.onBossStateUpdate?.(bossState);
+            }
           },
           onPlayerDamage: (damage) => {
-            if (!this.player) return;
-            this.player.stats.health = Math.max(0, this.player.stats.health - damage);
-            this.cameraManager?.addShake(0.5);
-            if (this.player.stats.health <= 0) {
-              this.handlePlayerDefeat();
-            }
+            this.damagePlayer(damage);
           },
           onBossDefeated: () => {
             this.handleBossVictory();
@@ -348,6 +401,7 @@ export class GameEngine {
       this.clock.start();
       this.startLoop();
 
+      onProgress?.('Synchronizing portals & celestial alignment...', 100);
       return true;
     } catch (err) {
       console.error('Game initialization failed:', err);
@@ -355,16 +409,219 @@ export class GameEngine {
     }
   }
 
+  public damagePlayer(damage: number): void {
+    if (!this.player) return;
+    this.player.stats.health = Math.max(0, this.player.stats.health - damage);
+    this.cameraManager?.addShake(0.35);
+    AudioService.playDamage();
+    if (this.player.stats.health <= 0) {
+      this.handlePlayerDefeat();
+    }
+  }
+
   private handlePlayerDefeat(): void {
-    NotificationSystem.notify('Expedition Knockout', 'You were overwhelmed by the void rift. Returning to beacon...', 'danger', 6000);
+    const cp = this.checkpoints.getActiveCheckpoint();
+    const cpName = cp ? cp.name : 'Verdant Monolith Beacon';
+    NotificationSystem.notify(
+      'Defeated in Combat',
+      `You succumbed to injuries. Respawn sanctuary established at ${cpName}!`,
+      'danger',
+      6000
+    );
+
+    if (this.uiCallbacks.onPlayerDefeated) {
+      this.setMode('RESPAWN');
+      this.uiCallbacks.onPlayerDefeated(cp || null);
+      return;
+    }
+
     if (!this.player || !this.world) return;
 
-    // Respawn at active checkpoint
-    const cp = this.checkpoints.getActiveCheckpoint();
+    // Controlled Respawn at latest active checkpoint without deleting inventory or progression
     const spawnPos = cp?.position || [0, 4.5, 0];
-    this.player.group.position.set(spawnPos[0], spawnPos[1], spawnPos[2]);
+    this.player.group.position.set(spawnPos[0], spawnPos[1] + 1.0, spawnPos[2]);
+    this.player.velocity.set(0, 0, 0);
     this.player.stats.health = this.player.stats.maxHealth;
     this.player.stats.stamina = this.player.stats.maxStamina;
+    this.persistSave();
+  }
+
+  public respawnPlayer(useStartingClearing: boolean = false): void {
+    if (!this.player || !this.world) return;
+    const cp = this.checkpoints.getActiveCheckpoint();
+    const spawnPos = useStartingClearing || !cp ? [0, 4.5, 0] : cp.position;
+    this.player.group.position.set(spawnPos[0], spawnPos[1] + 1.0, spawnPos[2]);
+    this.player.velocity.set(0, 0, 0);
+    this.player.stats.health = this.player.stats.maxHealth;
+    this.player.stats.stamina = this.player.stats.maxStamina;
+    this.setMode('PLAYING');
+    this.persistSave();
+  }
+
+  public updateSettings(newSettings: GameSettings): void {
+    this.activeSave.settings = { ...newSettings };
+    if (this.cameraManager) {
+      this.cameraManager.sensitivity = newSettings.cameraSensitivity || 1.0;
+      this.cameraManager.distance = newSettings.cameraDistance || 7.5;
+      if (newSettings.cameraMode) {
+        this.cameraManager.setMode(newSettings.cameraMode);
+      }
+    }
+    if (this.weather) {
+      this.weather.setParticleLimit(newSettings.particleLimit || 600);
+    }
+    if (this.bundle?.renderer) {
+      this.bundle.renderer.shadowMap.enabled = newSettings.shadows;
+    }
+    AudioService.setVolume(newSettings.masterVolume);
+    AudioService.setSfxVolume(newSettings.sfxVolume);
+    AudioService.setMusicVolume(newSettings.musicVolume);
+    AudioService.setMuted(!newSettings.soundEnabled);
+  }
+
+  /**
+   * Seamless / atmospheric dimension and destination transition
+   * Cleanly disposes inactive worlds, loads destination world, updates environment, and sets gravity.
+   */
+  public async switchDestination(destinationRegionId: string, targetCheckpointId?: string): Promise<boolean> {
+    if (!this.bundle || !this.player) return false;
+
+    const destRegion = REGIONS[destinationRegionId] || REGIONS.verdant_reach;
+    const destDim = DIMENSIONS[destRegion.dimensionId] || DIMENSIONS.the_living_reach;
+
+    // 1. Notify UI to display atmospheric warp overlay
+    this.uiCallbacks.onStartDimensionTransition?.(destinationRegionId);
+
+    // Audio & camera feedback
+    AudioService.playGatewayTeleport();
+    this.cameraManager?.addShake(0.8);
+
+    // 2. Cleanly dispose active world and scene objects (no background simulation of inactive worlds)
+    if (this.world) {
+      this.bundle.scene.remove(this.world.group);
+      this.world.dispose();
+      this.world = null;
+    }
+
+    // Cleanly clear entities, flora, wildlife, and portal meshes
+    this.flora?.clear();
+    this.wildlife?.clear();
+    this.combatEnemies?.clear();
+    this.portals?.clear();
+
+    // 3. Update environment lighting & fog for destination
+    if (this.bundle.scene.fog && 'color' in this.bundle.scene.fog) {
+      (this.bundle.scene.fog as THREE.FogExp2).color.setHex(destRegion.fogColor);
+      (this.bundle.scene.fog as THREE.FogExp2).density = destRegion.fogDensity;
+    }
+    this.bundle.renderer.setClearColor(destDim.skyVoidColor, 1);
+
+    // 4. Update player physics for destination gravity
+    this.player.gravityModifier = destRegion.gravityModifier ?? destDim.gravityModifier;
+
+    // 5. Generate destination world
+    const maxAnisotropy = this.bundle.isSoftwareGl ? 1 : this.bundle.renderer.capabilities.getMaxAnisotropy();
+    this.world = WorldGenerator.generate(destinationRegionId, maxAnisotropy, this.bundle.isSoftwareGl);
+    this.bundle.scene.add(this.world.group);
+
+    // 6. Set player position
+    let spawnPos: [number, number, number] = [...destRegion.spawnPoint];
+    if (targetCheckpointId) {
+      const cp = CHECKPOINTS.find((c) => c.id === targetCheckpointId);
+      if (cp) {
+        spawnPos = [...cp.position];
+      }
+    }
+    const safeY = this.world.getTerrainHeight(spawnPos[0], spawnPos[2]) + 1.2;
+    spawnPos[1] = Math.max(spawnPos[1], safeY);
+    this.player.group.position.set(spawnPos[0], spawnPos[1], spawnPos[2]);
+    this.player.velocity.set(0, 0, 0);
+
+    // 7. Populate portals for this destination (outbound gateways or return conduits)
+    if (this.portals) {
+      this.portals.populateForRegion(destinationRegionId, (x, z) => this.world!.getTerrainHeight(x, z));
+    }
+
+    // 8. Re-populate entities, flora, wildlife for this region
+    if (destinationRegionId === 'verdant_reach') {
+      if (this.structures) {
+        this.structures.buildAll(this.world.getTerrainHeight, this.activeSave);
+      }
+      this.flora?.populate(this.world.getTerrainHeight, this.inventory, this.activeSave);
+      this.wildlife?.populate();
+      this.restoreRelicsState();
+    }
+
+    // 9. Update & persist save
+    this.activeSave.dimensionId = destRegion.dimensionId;
+    this.activeSave.regionId = destinationRegionId;
+    if (!this.activeSave.dimensionProgress) {
+      this.activeSave.dimensionProgress = {};
+    }
+    this.activeSave.dimensionProgress[destinationRegionId] = {
+      unlocked: true,
+      discovered: true,
+      activatedCheckpoints: this.activeSave.activatedCheckpoints,
+      firstVisitedAt: this.activeSave.dimensionProgress[destinationRegionId]?.firstVisitedAt || Date.now(),
+    };
+
+    if (!this.activeSave.discoveries.includes(destRegion.name)) {
+      this.activeSave.discoveries.push(destRegion.name);
+      this.quests.reportProgress('DISCOVER', destinationRegionId, 1);
+    }
+
+    this.persistSave();
+    this.uiCallbacks.onDiscoveriesUpdate?.(this.activeSave.discoveries);
+    NotificationSystem.notify(
+      `Arrived in ${destRegion.name}`,
+      `${destDim.name} · ${destRegion.subtitle}`,
+      'discovery',
+      6000
+    );
+
+    return true;
+  }
+
+  public handleAttack(): void {
+    if (!this.player || this.mode !== 'PLAYING') return;
+    const attacked = this.player.performAttack();
+    if (!attacked) {
+      if (this.player.stats.stamina < 12) {
+        NotificationSystem.notify('Exhausted', 'Need at least 12 stamina to swing weapon!', 'info', 1500);
+      }
+      return;
+    }
+
+    const playerPos = this.player.group.position;
+    const playerFacing = this.player.facingAngle;
+    let damage = this.player.baseAttackPower;
+
+    // Apply equipment bonuses if equipped
+    if (this.inventory.equipped.tool) {
+      damage += 12;
+    }
+    if (this.inventory.equipped.accessory === 'relic_colossus_core') {
+      damage += 15;
+    }
+
+    // 1. Strike hostile enemies
+    const enemyResult = this.combatEnemies?.handlePlayerAttack(playerPos, playerFacing, damage);
+
+    // 2. Strike bosses
+    const bossResult = this.bossManager?.handlePlayerAttack(playerPos, damage);
+
+    // 3. Crimson Warden legacy strike check
+    if (this.crimsonWarden?.state.active && !this.crimsonWarden.state.isDefeated) {
+      const distToWarden = playerPos.distanceTo(this.crimsonWarden.getBossPosition());
+      if (distToWarden <= 6.5) {
+        this.crimsonWarden.takeDamage(damage);
+        this.cameraManager?.addShake(0.2);
+      }
+    }
+
+    if ((enemyResult && enemyResult.hitCount > 0) || (bossResult && bossResult.hit)) {
+      this.cameraManager?.addShake(0.22);
+    }
   }
 
   private handleBossVictory(): void {
@@ -396,7 +653,7 @@ export class GameEngine {
       }
     });
 
-    if (this.activeSave.beaconStates['verdant_monolith_beacon']) {
+    if (this.activeSave.beaconStates['verdant_monolith_beacon'] && this.world.beacon) {
       this.world.beacon.data.activated = true;
       (this.world.beacon.beamMesh.material as THREE.MeshBasicMaterial).opacity = 0.85;
       this.uiCallbacks.onBeaconStateChange(true);
@@ -541,6 +798,9 @@ export class GameEngine {
     // 3B. Structures animation (astrolabe rings, gates, crystals, dimensional gateway vortex)
     this.structures?.update(dt, this.totalSimulationTime);
 
+    // 3C. Dimension Portals animation (vortex pulsation, concentric rings, dynamic lights)
+    this.portals?.update(dt, this.totalSimulationTime);
+
     // 4. Entity updates (NPCs, schedules, trading creatures, wisps)
     this.entities?.update(dt, this.totalSimulationTime, this.dayNight.state, this.activeSave.discoveries);
 
@@ -549,7 +809,13 @@ export class GameEngine {
       isRedMoon: Boolean(this.dayNight.state.isRedMoon),
     });
 
-    // 5. Crimson Warden Boss simulation
+    // 5. Boss Manager (6 distinct world bosses with phases & telegraphed attacks)
+    this.bossManager?.update(dt, this.player.group.position, Boolean(this.dayNight.state.isRedMoon));
+
+    // 5B. Combat Enemies (5 distinct hostile archetypes across island biomes)
+    this.combatEnemies?.update(dt, this.player.group.position, (dmg) => this.damagePlayer(dmg));
+
+    // 5C. Crimson Warden Boss simulation
     if (this.crimsonWarden) {
       this.crimsonWarden.update(
         dt,
@@ -662,12 +928,29 @@ export class GameEngine {
       }
     );
 
-    // 3. Check Crimson Warden Combat Proximity
+    // 3. Check World Boss Combat Proximity
+    if (!foundPrompt && this.bossManager) {
+      const bossCheck = this.bossManager.isNearAnyBoss(playerPos, 6.5);
+      if (bossCheck.near) {
+        this.isNearBoss = true;
+        foundPrompt = `Press [F] or [Attack] to Strike ${bossCheck.bossName}!`;
+      }
+    }
+
+    // 3B. Check Hostile Enemy Combat Proximity
+    if (!foundPrompt && this.combatEnemies) {
+      const nearestEnemy = this.combatEnemies.getNearestEnemy(playerPos, 4.0);
+      if (nearestEnemy) {
+        foundPrompt = `Press [F] or [Attack] to Strike ${nearestEnemy.name}!`;
+      }
+    }
+
+    // 3C. Check Crimson Warden Combat Proximity
     if (!foundPrompt && this.crimsonWarden?.state.active) {
       const distToBoss = playerPos.distanceTo(this.crimsonWarden.getBossPosition());
       if (distToBoss < 6.5) {
         this.isNearBoss = true;
-        foundPrompt = 'Press [E] or Action to Strike Crimson Warden!';
+        foundPrompt = 'Press [F] or [Attack] to Strike Crimson Warden!';
       }
     }
 
@@ -738,8 +1021,23 @@ export class GameEngine {
       }
     }
 
+    // 5C. Check Portals (Dimensional Gateways and Return Conduits)
+    this.nearbyPortal = null;
+    if (!foundPrompt && this.portals) {
+      const nearby = this.portals.getNearbyPortal([playerPos.x, playerPos.y, playerPos.z], 4.2);
+      if (nearby) {
+        this.nearbyPortal = nearby;
+        const check = checkPortalUnlock(nearby.portal, this.activeSave, this.inventory, this.quests);
+        if (check.isUnlocked) {
+          foundPrompt = `Press [E] or Action to Step Through ${nearby.portal.name}`;
+        } else {
+          foundPrompt = `Press [E] to Inspect ${nearby.portal.name} (Prerequisites Required)`;
+        }
+      }
+    }
+
     // 6. Check Ancient Beacon
-    if (!foundPrompt && beaconDist < 6.5) {
+    if (!foundPrompt && this.world.beacon && beaconDist < 6.5) {
       this.isNearBeacon = true;
       if (!this.world.beacon.data.activated) {
         const collectedCount = this.activeSave.collectedShardIds.length;
@@ -788,6 +1086,13 @@ export class GameEngine {
 
   public handleInteract(): void {
     if (this.mode !== 'PLAYING' || !this.world || !this.player) return;
+
+    // 0. Portal inspection or traversal
+    if (this.nearbyPortal) {
+      const check = checkPortalUnlock(this.nearbyPortal.portal, this.activeSave, this.inventory, this.quests);
+      this.uiCallbacks.onInspectPortal?.(this.nearbyPortal.portal, check);
+      return;
+    }
 
     // 1. Structure interaction via InteractionSystem
     if (this.interactions && this.interactions.executeInteraction()) {
@@ -903,7 +1208,7 @@ export class GameEngine {
     }
 
     // 4. Awaken Beacon
-    if (this.isNearBeacon && !this.world.beacon.data.activated) {
+    if (this.isNearBeacon && this.world.beacon && !this.world.beacon.data.activated) {
       const collectedCount = this.activeSave.collectedShardIds.length;
       const q3Done = this.quests.getJournalSnapshot().completed.some((q) => q.id === 'quest_main_3_repair');
       if (q3Done || collectedCount >= this.world.beacon.data.requiredShards) {
@@ -1035,6 +1340,10 @@ export class GameEngine {
       dayCount: this.dayNight.state.dayCount,
     };
     this.activeSave.redMoon = { ...this.dayNight.redMoonSave };
+    if (this.bossManager) {
+      this.activeSave.defeatedBosses = Array.from(this.bossManager.defeatedBosses);
+      this.activeSave.claimedBossRewards = Array.from(this.bossManager.claimedBossRewards);
+    }
     StorageService.saveGame(this.activeSave);
   }
 
@@ -1177,6 +1486,8 @@ export class GameEngine {
     this.player?.dispose();
     this.entities?.dispose();
     this.wildlife?.dispose();
+    this.combatEnemies?.dispose();
+    this.bossManager?.dispose();
     this.structures?.dispose();
     this.crimsonWarden?.dispose();
     this.weather?.dispose();

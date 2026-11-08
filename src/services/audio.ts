@@ -8,8 +8,11 @@ export class AudioService {
   private static ctx: AudioContext | null = null;
   private static masterGain: GainNode | null = null;
   private static ambientGain: GainNode | null = null;
+  private static sfxGain: GainNode | null = null;
   private static isMuted: boolean = false;
   private static volume: number = 0.7;
+  private static sfxVolume: number = 0.8;
+  private static musicVolume: number = 0.7;
   private static isAmbientPlaying: boolean = false;
   private static ambientOsc1: OscillatorNode | null = null;
   private static ambientOsc2: OscillatorNode | null = null;
@@ -36,8 +39,12 @@ export class AudioService {
       this.masterGain.connect(this.ctx.destination);
 
       this.ambientGain = this.ctx.createGain();
-      this.ambientGain.gain.setValueAtTime(0.18, this.ctx.currentTime);
+      this.ambientGain.gain.setValueAtTime(0.18 * this.musicVolume, this.ctx.currentTime);
       this.ambientGain.connect(this.masterGain);
+
+      this.sfxGain = this.ctx.createGain();
+      this.sfxGain.gain.setValueAtTime(this.sfxVolume, this.ctx.currentTime);
+      this.sfxGain.connect(this.masterGain);
     } catch (e) {
       console.warn('Web Audio API not supported or initialization delayed.', e);
     }
@@ -63,6 +70,28 @@ export class AudioService {
 
   static getVolume(): number {
     return this.volume;
+  }
+
+  static setSfxVolume(val: number): void {
+    this.sfxVolume = Math.max(0, Math.min(1, val));
+    if (this.sfxGain && this.ctx) {
+      this.sfxGain.gain.setTargetAtTime(this.sfxVolume, this.ctx.currentTime, 0.05);
+    }
+  }
+
+  static getSfxVolume(): number {
+    return this.sfxVolume;
+  }
+
+  static setMusicVolume(val: number): void {
+    this.musicVolume = Math.max(0, Math.min(1, val));
+    if (this.ambientGain && this.ctx) {
+      this.ambientGain.gain.setTargetAtTime(0.18 * this.musicVolume, this.ctx.currentTime, 0.05);
+    }
+  }
+
+  static getMusicVolume(): number {
+    return this.musicVolume;
   }
 
   /**
@@ -141,7 +170,7 @@ export class AudioService {
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
 
       osc.connect(gain);
-      gain.connect(this.masterGain);
+      gain.connect(this.sfxGain || this.masterGain);
 
       osc.start(now);
       osc.stop(now + 0.24);
@@ -172,7 +201,7 @@ export class AudioService {
 
       osc.connect(filter);
       filter.connect(gain);
-      gain.connect(this.masterGain);
+      gain.connect(this.sfxGain || this.masterGain);
 
       osc.start(now);
       osc.stop(now + 0.32);
@@ -197,7 +226,7 @@ export class AudioService {
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
 
       osc.connect(gain);
-      gain.connect(this.masterGain);
+      gain.connect(this.sfxGain || this.masterGain);
 
       osc.start(now);
       osc.stop(now + 0.1);
@@ -226,7 +255,7 @@ export class AudioService {
         gain.gain.exponentialRampToValueAtTime(0.001, start + 0.65);
 
         osc.connect(gain);
-        gain.connect(this.masterGain);
+        gain.connect(this.sfxGain || this.masterGain);
 
         osc.start(start);
         osc.stop(start + 0.7);
@@ -253,7 +282,7 @@ export class AudioService {
       gain.gain.exponentialRampToValueAtTime(0.001, now + 2.0);
 
       osc.connect(gain);
-      gain.connect(this.masterGain);
+      gain.connect(this.sfxGain || this.masterGain);
 
       osc.start(now);
       osc.stop(now + 2.1);
@@ -278,7 +307,7 @@ export class AudioService {
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
 
       osc.connect(gain);
-      gain.connect(this.masterGain);
+      gain.connect(this.sfxGain || this.masterGain);
 
       osc.start(now);
       osc.stop(now + 0.05);
@@ -303,7 +332,7 @@ export class AudioService {
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
 
       osc.connect(gain);
-      gain.connect(this.masterGain);
+      gain.connect(this.sfxGain || this.masterGain);
 
       osc.start(now);
       osc.stop(now + 0.2);
@@ -328,7 +357,7 @@ export class AudioService {
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
 
       osc.connect(gain);
-      gain.connect(this.masterGain);
+      gain.connect(this.sfxGain || this.masterGain);
 
       osc.start(now);
       osc.stop(now + 0.11);
@@ -355,7 +384,7 @@ export class AudioService {
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.75);
 
       osc.connect(gain);
-      gain.connect(this.masterGain);
+      gain.connect(this.sfxGain || this.masterGain);
 
       osc.start(now);
       osc.stop(now + 0.8);
@@ -380,7 +409,7 @@ export class AudioService {
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
 
       osc.connect(gain);
-      gain.connect(this.masterGain);
+      gain.connect(this.sfxGain || this.masterGain);
 
       osc.start(now);
       osc.stop(now + 0.2);
@@ -403,7 +432,7 @@ export class AudioService {
       gain1.gain.setValueAtTime(0.25, now);
       gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
       osc1.connect(gain1);
-      gain1.connect(this.masterGain);
+      gain1.connect(this.sfxGain || this.masterGain);
       osc1.start(now);
       osc1.stop(now + 0.16);
 
@@ -415,7 +444,7 @@ export class AudioService {
       gain2.gain.setValueAtTime(0.18, now);
       gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
       osc2.connect(gain2);
-      gain2.connect(this.masterGain);
+      gain2.connect(this.sfxGain || this.masterGain);
       osc2.start(now);
       osc2.stop(now + 0.42);
     } catch {}
@@ -442,7 +471,7 @@ export class AudioService {
         gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.85);
 
         osc.connect(gain);
-        gain.connect(this.masterGain);
+        gain.connect(this.sfxGain || this.masterGain);
 
         osc.start(startTime);
         osc.stop(startTime + 0.9);
@@ -470,10 +499,87 @@ export class AudioService {
       gain.gain.exponentialRampToValueAtTime(0.001, now + 1.1);
 
       osc.connect(gain);
-      gain.connect(this.masterGain);
+      gain.connect(this.sfxGain || this.masterGain);
 
       osc.start(now);
       osc.stop(now + 1.2);
+    } catch {}
+  }
+
+  /**
+   * Sound effect: Player melee attack whoosh
+   */
+  static playAttackSwing(): void {
+    if (!this.ctx || !this.masterGain || this.isMuted) return;
+    try {
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(340, now);
+      osc.frequency.exponentialRampToValueAtTime(110, now + 0.12);
+
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
+
+      osc.connect(gain);
+      gain.connect(this.sfxGain || this.masterGain);
+
+      osc.start(now);
+      osc.stop(now + 0.15);
+    } catch {}
+  }
+
+  /**
+   * Sound effect: Melee strike impact / hit connect
+   */
+  static playHit(): void {
+    if (!this.ctx || !this.masterGain || this.isMuted) return;
+    try {
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(260, now);
+      osc.frequency.exponentialRampToValueAtTime(70, now + 0.16);
+
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+
+      osc.connect(gain);
+      gain.connect(this.sfxGain || this.masterGain);
+
+      osc.start(now);
+      osc.stop(now + 0.2);
+    } catch {}
+  }
+
+  /**
+   * Sound effect: Boss enters Phase 2 Enrage
+   */
+  static playBossPhaseChange(): void {
+    if (!this.ctx || !this.masterGain || this.isMuted) return;
+    try {
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(90, now);
+      osc.frequency.linearRampToValueAtTime(320, now + 0.6);
+      osc.frequency.exponentialRampToValueAtTime(60, now + 1.2);
+
+      gain.gain.setValueAtTime(0.01, now);
+      gain.gain.linearRampToValueAtTime(0.4, now + 0.4);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 1.3);
+
+      osc.connect(gain);
+      gain.connect(this.sfxGain || this.masterGain);
+
+      osc.start(now);
+      osc.stop(now + 1.35);
     } catch {}
   }
 }

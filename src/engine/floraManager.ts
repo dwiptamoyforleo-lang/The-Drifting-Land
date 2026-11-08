@@ -866,7 +866,14 @@ export class FloraManager {
     });
   }
 
-  public dispose(): void {
+  public clear(): void {
+    while (this.group.children.length > 0) {
+      this.group.remove(this.group.children[0]);
+    }
     this.nodes.clear();
+  }
+
+  public dispose(): void {
+    this.clear();
   }
 }

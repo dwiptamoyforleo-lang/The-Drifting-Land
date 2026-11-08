@@ -28,6 +28,9 @@ export class CrimsonWardenEncounter {
 
   // Boss state
   public state: CrimsonWardenState = {
+    id: 'crimson_warden',
+    name: 'Crimson Warden',
+    subtitle: 'Scourge of the Eclipse',
     active: false,
     health: 600,
     maxHealth: 600,
@@ -524,6 +527,29 @@ export class CrimsonWardenEncounter {
       this.callbacks.onBossStateChange(this.state);
     }
 
+    return true;
+  }
+
+  public takeDamage(damage: number): boolean {
+    if (!this.state.active || this.state.isDefeated) return false;
+    this.state.health = Math.max(0, this.state.health - damage);
+
+    if (this.state.health <= 300 && this.state.phase === 1) {
+      this.state.phase = 2;
+      NotificationSystem.notify(
+        'Crimson Warden Enraged!',
+        'The warden unlocks the Void Seal! Speed and attack power surge!',
+        'danger',
+        6000
+      );
+      AudioService.playBeaconActivate();
+    }
+
+    if (this.state.health <= 0) {
+      this.handleDefeat();
+    } else {
+      this.callbacks.onBossStateChange(this.state);
+    }
     return true;
   }
 

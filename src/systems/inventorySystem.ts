@@ -140,6 +140,8 @@ export class InventorySystem {
   getSortedSlots(slotsToSort: InventorySlot[], sortOption: InventorySortOption): InventorySlot[] {
     const list = [...slotsToSort];
     const rarityRank: Record<ItemRarity, number> = {
+      'event-exclusive': 6,
+      'event_exclusive': 6,
       legendary: 5,
       epic: 4,
       rare: 3,

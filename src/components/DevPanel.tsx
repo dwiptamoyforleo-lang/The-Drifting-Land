@@ -34,6 +34,7 @@ interface DevPanelProps {
   onSetWeather: (weather: WeatherType) => void;
   onResetCooldown: () => void;
   onTeleport: (x: number, z: number) => void;
+  onSwitchDestination?: (regionId: string) => void;
   isRedMoon: boolean;
   clockTime: string;
   dayCount: number;
@@ -48,6 +49,7 @@ export const DevPanel: React.FC<DevPanelProps> = ({
   onSetWeather,
   onResetCooldown,
   onTeleport,
+  onSwitchDestination,
   isRedMoon,
   clockTime,
   dayCount,
@@ -254,13 +256,61 @@ export const DevPanel: React.FC<DevPanelProps> = ({
           </div>
         </div>
 
-        {/* Section 4: Fast Landmark Teleportation */}
+        {/* Section 4: Fast Landmark & Boss Arena Teleportation */}
         <div className="mt-5">
           <div className="flex items-center gap-1.5 text-xs font-bold text-amber-300 uppercase tracking-wider mb-2">
             <MapPin className="w-3.5 h-3.5" />
-            <span>Fast Landmark Teleport</span>
+            <span>Fast Boss & Landmark Teleport</span>
           </div>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            <button
+              onClick={() => onTeleport(-36, 28)}
+              className="p-2 rounded-xl bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-600/60 text-emerald-200 text-xs flex items-center justify-center gap-1.5 cursor-pointer font-bold"
+            >
+              <Skull className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Boss: Rootbound [-36, 28]</span>
+            </button>
+
+            <button
+              onClick={() => onTeleport(-25, -50)}
+              className="p-2 rounded-xl bg-orange-950/70 hover:bg-orange-900 border border-orange-600/60 text-orange-200 text-xs flex items-center justify-center gap-1.5 cursor-pointer font-bold"
+            >
+              <Skull className="w-3.5 h-3.5 text-orange-400" />
+              <span>Boss: Ash Colossus [-25, -50]</span>
+            </button>
+
+            <button
+              onClick={() => onTeleport(46, 24)}
+              className="p-2 rounded-xl bg-sky-950/70 hover:bg-sky-900 border border-sky-600/60 text-sky-200 text-xs flex items-center justify-center gap-1.5 cursor-pointer font-bold"
+            >
+              <Skull className="w-3.5 h-3.5 text-sky-400" />
+              <span>Boss: Sentinel [46, 24]</span>
+            </button>
+
+            <button
+              onClick={() => onTeleport(-48, -10)}
+              className="p-2 rounded-xl bg-purple-950/70 hover:bg-purple-900 border border-purple-600/60 text-purple-200 text-xs flex items-center justify-center gap-1.5 cursor-pointer font-bold"
+            >
+              <Skull className="w-3.5 h-3.5 text-purple-400" />
+              <span>Boss: Archivist [-48, -10]</span>
+            </button>
+
+            <button
+              onClick={() => onTeleport(-56, -20)}
+              className="p-2 rounded-xl bg-pink-950/70 hover:bg-pink-900 border border-pink-600/60 text-pink-200 text-xs flex items-center justify-center gap-1.5 cursor-pointer font-bold"
+            >
+              <Skull className="w-3.5 h-3.5 text-pink-400" />
+              <span>Boss: Sovereign [-56, -20]</span>
+            </button>
+
+            <button
+              onClick={() => onTeleport(-52, -45)}
+              className="p-2 rounded-xl bg-red-950/70 hover:bg-red-900 border border-red-600/60 text-red-200 text-xs flex items-center justify-center gap-1.5 cursor-pointer font-bold"
+            >
+              <Skull className="w-3.5 h-3.5 text-red-400" />
+              <span>Boss: Warden [-52, -45]</span>
+            </button>
+
             <button
               onClick={() => onTeleport(0, 0)}
               className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs flex items-center justify-center gap-1.5 cursor-pointer"
@@ -269,70 +319,67 @@ export const DevPanel: React.FC<DevPanelProps> = ({
             </button>
 
             <button
-              onClick={() => onTeleport(-52, -45)}
-              className="p-2 rounded-xl bg-red-950/60 hover:bg-red-900 border border-red-600/50 text-red-200 text-xs flex items-center justify-center gap-1.5 cursor-pointer font-bold"
+              onClick={() => onTeleport(-10, 15)}
+              className="p-2 rounded-xl bg-emerald-950/50 hover:bg-emerald-900 border border-emerald-800 text-emerald-300 text-xs flex items-center justify-center gap-1.5 cursor-pointer"
             >
-              <Skull className="w-3.5 h-3.5 text-red-400" />
-              <span>Rift Crater Boss [-52, -45]</span>
-            </button>
-
-            <button
-              onClick={() => onTeleport(-34, 18)}
-              className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <span>Sunken Ruins [-34, 18]</span>
-            </button>
-
-            <button
-              onClick={() => onTeleport(38, 25)}
-              className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <span>Promontory Tower [38, 25]</span>
-            </button>
-
-            <button
-              onClick={() => onTeleport(-22, -35)}
-              className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <span>Hollow Homestead [-22, -35]</span>
-            </button>
-
-            <button
-              onClick={() => onTeleport(12, 28)}
-              className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <span>Research Camp [12, 28]</span>
-            </button>
-
-            <button
-              onClick={() => onTeleport(24, -10)}
-              className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <span>Suspension Bridge [24, -10]</span>
-            </button>
-
-            <button
-              onClick={() => onTeleport(-48, -8)}
-              className="p-2 rounded-xl bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-700/50 text-emerald-200 text-xs flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <span>Hidden Chamber [-48, -8]</span>
+              <span>Verdant Haven [-10, 15]</span>
             </button>
 
             <button
               onClick={() => onTeleport(-50, -20)}
               className="p-2 rounded-xl bg-indigo-950/60 hover:bg-indigo-900 border border-indigo-700/50 text-indigo-200 text-xs flex items-center justify-center gap-1.5 cursor-pointer"
             >
-              <span>Dimensional Gateway [-50, -20]</span>
-            </button>
-
-            <button
-              onClick={() => onTeleport(-16, 32)}
-              className="p-2 rounded-xl bg-cyan-950/60 hover:bg-cyan-900 border border-cyan-700/50 text-cyan-200 text-xs flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <span>Lumicite Vein [-16, 32]</span>
+              <span>Gateway [-50, -20]</span>
             </button>
           </div>
         </div>
+
+        {/* Dimension & Destination Warping */}
+        {onSwitchDestination && (
+          <div className="pt-3 border-t border-slate-800">
+            <h3 className="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wide">
+              Dimension & Destination Leap
+            </h3>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => onSwitchDestination('verdant_reach')}
+                className="p-2 rounded-xl bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-700 text-emerald-200 text-xs cursor-pointer font-bold"
+              >
+                1. The Verdant Reach (Living Reach)
+              </button>
+              <button
+                onClick={() => onSwitchDestination('shattered_highlands')}
+                className="p-2 rounded-xl bg-sky-950/60 hover:bg-sky-900 border border-sky-700 text-sky-200 text-xs cursor-pointer font-bold"
+              >
+                2. Shattered Highlands (Living Reach)
+              </button>
+              <button
+                onClick={() => onSwitchDestination('ashen_expanse')}
+                className="p-2 rounded-xl bg-amber-950/60 hover:bg-amber-900 border border-amber-700 text-amber-200 text-xs cursor-pointer font-bold"
+              >
+                3. The Ashen Expanse (Ashen Expanse)
+              </button>
+              <button
+                onClick={() => onSwitchDestination('sunken_archive')}
+                className="p-2 rounded-xl bg-cyan-950/60 hover:bg-cyan-900 border border-cyan-700 text-cyan-200 text-xs cursor-pointer font-bold"
+              >
+                4. The Sunken Archive (Fractured Archive)
+              </button>
+              <button
+                onClick={() => onSwitchDestination('moonveil_wilds')}
+                className="p-2 rounded-xl bg-purple-950/60 hover:bg-purple-900 border border-purple-700 text-purple-200 text-xs cursor-pointer font-bold"
+              >
+                5. The Moonveil Wilds (The Moonveil)
+              </button>
+              <button
+                onClick={() => onSwitchDestination('rift_frontier')}
+                className="p-2 rounded-xl bg-fuchsia-950/60 hover:bg-fuchsia-900 border border-fuchsia-700 text-fuchsia-200 text-xs cursor-pointer font-bold"
+              >
+                6. The Rift Frontier (The Rift)
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

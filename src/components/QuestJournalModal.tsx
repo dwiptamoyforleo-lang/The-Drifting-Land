@@ -37,6 +37,7 @@ interface QuestJournalModalProps {
   questSystem: QuestSystem;
   achievementSystem?: AchievementSystem;
   discoveries?: string[];
+  initialTab?: 'quests' | 'ranks' | 'achievements';
   onClose: () => void;
 }
 
@@ -58,9 +59,10 @@ export const QuestJournalModal: React.FC<QuestJournalModalProps> = ({
   questSystem,
   achievementSystem,
   discoveries = [],
+  initialTab = 'quests',
   onClose,
 }) => {
-  const [mainTab, setMainTab] = useState<'quests' | 'ranks' | 'achievements'>('quests');
+  const [mainTab, setMainTab] = useState<'quests' | 'ranks' | 'achievements'>(initialTab);
   const [questFilter, setQuestFilter] = useState<'all' | 'active' | 'completed' | 'available'>('all');
   const [categoryFilter, setCategoryFilter] = useState<QuestCategory | 'all'>('all');
   const [selectedQuestId, setSelectedQuestId] = useState<string | null>(null);

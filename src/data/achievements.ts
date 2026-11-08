@@ -106,6 +106,83 @@ export const ACHIEVEMENTS_CATALOG: Record<string, AchievementDefinition> = {
       coins: 250,
     },
   },
+  ach_warden_slain: {
+    id: 'ach_warden_slain',
+    title: 'Bane of the Crimson Warden',
+    description: 'Confront and defeat the colossal Crimson Warden during the eclipse.',
+    category: 'boss',
+    icon: 'skull',
+    rewards: {
+      experience: 500,
+      coins: 250,
+    },
+  },
+  ach_combat_victor: {
+    id: 'ach_combat_victor',
+    title: 'Frontier Vanquisher',
+    description: 'Win your first combat engagement against hostile island creatures.',
+    category: 'boss',
+    icon: 'sword',
+    rewards: {
+      experience: 100,
+      coins: 50,
+    },
+  },
+  ach_grove_conquered: {
+    id: 'ach_grove_conquered',
+    title: 'Primal Awakening',
+    description: 'Defeat the Rootbound Guardian in the Overgrown Grove Altar.',
+    category: 'boss',
+    icon: 'sprout',
+    rewards: {
+      experience: 350,
+      coins: 180,
+    },
+  },
+  ach_colossus_conquered: {
+    id: 'ach_colossus_conquered',
+    title: 'Heart of Cinders',
+    description: 'Extinguish the molten volcanic fury of the Ash Colossus.',
+    category: 'boss',
+    icon: 'flame',
+    rewards: {
+      experience: 400,
+      coins: 200,
+    },
+  },
+  ach_storm_conquered: {
+    id: 'ach_storm_conquered',
+    title: 'Eye of the Gale',
+    description: 'Silence the tempest resonance of the Storm Sentinel atop Windward Promontory.',
+    category: 'boss',
+    icon: 'zap',
+    rewards: {
+      experience: 420,
+      coins: 220,
+    },
+  },
+  ach_archive_conquered: {
+    id: 'ach_archive_conquered',
+    title: 'Keeper of Forgotten Truths',
+    description: 'Overcome the Archive Keeper in the Sunken Undercroft Vault.',
+    category: 'boss',
+    icon: 'key',
+    rewards: {
+      experience: 450,
+      coins: 240,
+    },
+  },
+  ach_sovereign_conquered: {
+    id: 'ach_sovereign_conquered',
+    title: 'Beyond the Dimensional Veil',
+    description: 'Vanquish the Rift Sovereign at the Dimensional Gateway Nexus.',
+    category: 'boss',
+    icon: 'sparkles',
+    rewards: {
+      experience: 600,
+      coins: 350,
+    },
+  },
   ach_rank_master: {
     id: 'ach_rank_master',
     title: 'Master of the Expanse',

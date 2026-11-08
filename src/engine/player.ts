@@ -44,6 +44,15 @@ export class PlayerController {
   private scarfMesh: THREE.Mesh;
   private lanternLight: THREE.PointLight;
   private contactShadow: THREE.Mesh;
+  private weaponMesh: THREE.Mesh;
+  private slashArcMesh: THREE.Mesh;
+  private slashArcMat: THREE.MeshBasicMaterial;
+
+  // Combat stats & timers
+  public attackCooldown: number = 0;
+  public attackSwingTimer: number = 0;
+  public baseAttackPower: number = 28;
+  public gravityModifier: number = 1.0;
 
   // Camera settings
   public cameraDistance: number = 7.5;
@@ -169,6 +178,58 @@ export class PlayerController {
     this.contactShadow = new THREE.Mesh(shadowGeo, shadowMat);
     this.contactShadow.position.y = 0.03; // offset slightly above ground to prevent z-fighting
     this.group.add(this.contactShadow);
+
+    // 8. Combat: Aether Glaive / Blade Mesh
+    const weaponGroup = new THREE.Group();
+    const hiltGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.6, 6);
+    const hiltMat = new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.8, roughness: 0.3 });
+    const hilt = new THREE.Mesh(hiltGeo, hiltMat);
+    hilt.position.set(0, 0, 0);
+
+    const bladeGeo = new THREE.BoxGeometry(0.08, 0.9, 0.04);
+    bladeGeo.translate(0, 0.55, 0);
+    const bladeMat = new THREE.MeshStandardMaterial({
+      color: 0x06b6d4,
+      emissive: 0x22d3ee,
+      emissiveIntensity: 0.8,
+      metalness: 0.9,
+      roughness: 0.1,
+    });
+    const blade = new THREE.Mesh(bladeGeo, bladeMat);
+
+    weaponGroup.add(hilt);
+    weaponGroup.add(blade);
+    weaponGroup.position.set(0.55, 1.1, 0.2);
+    weaponGroup.rotation.x = -Math.PI / 8;
+    this.weaponMesh = weaponGroup as any;
+    this.group.add(weaponGroup);
+
+    // 9. Slash Arc Visual Effect (Telegraph & Hit Visual)
+    const arcGeo = new THREE.RingGeometry(1.2, 2.2, 16, 1, 0, Math.PI * 0.7);
+    arcGeo.rotateX(-Math.PI / 2);
+    arcGeo.translate(0, 1.1, 0.6);
+    this.slashArcMat = new THREE.MeshBasicMaterial({
+      color: 0x38bdf8,
+      transparent: true,
+      opacity: 0,
+      side: THREE.DoubleSide,
+    });
+    this.slashArcMesh = new THREE.Mesh(arcGeo, this.slashArcMat);
+    this.group.add(this.slashArcMesh);
+  }
+
+  /**
+   * Trigger player melee attack with stamina check
+   */
+  public performAttack(): boolean {
+    if (this.attackCooldown > 0 || this.stats.stamina < 12) {
+      return false;
+    }
+    this.stats.stamina = Math.max(0, this.stats.stamina - 12);
+    this.attackCooldown = 0.35;
+    this.attackSwingTimer = 0.22;
+    AudioService.playAttackSwing();
+    return true;
   }
 
   /**
@@ -189,6 +250,20 @@ export class PlayerController {
     if (this.dashCooldown > 0) this.dashCooldown -= dt;
     if (this.jumpBufferTimer > 0) this.jumpBufferTimer -= dt;
     if (this.coyoteTimer > 0) this.coyoteTimer -= dt;
+    if (this.attackCooldown > 0) this.attackCooldown -= dt;
+
+    // Attack Swing Animation
+    if (this.attackSwingTimer > 0) {
+      this.attackSwingTimer -= dt;
+      const progress = 1.0 - (this.attackSwingTimer / 0.22);
+      this.weaponMesh.rotation.x = -Math.PI / 6 + Math.sin(progress * Math.PI) * 1.5;
+      this.weaponMesh.rotation.y = Math.sin(progress * Math.PI) * 0.8;
+      this.slashArcMat.opacity = Math.sin(progress * Math.PI) * 0.85;
+    } else {
+      this.weaponMesh.rotation.x = -Math.PI / 8;
+      this.weaponMesh.rotation.y = 0;
+      this.slashArcMat.opacity = 0;
+    }
 
     if (input.jump) {
       this.jumpBufferTimer = 0.15; // 150ms buffer
@@ -325,7 +400,7 @@ export class PlayerController {
       }
     }
 
-    const gravity = -24;
+    const gravity = -24 * this.gravityModifier;
     this.velocity.y += gravity * dt;
     this.group.position.x += this.velocity.x * dt;
     this.group.position.z += this.velocity.z * dt;
