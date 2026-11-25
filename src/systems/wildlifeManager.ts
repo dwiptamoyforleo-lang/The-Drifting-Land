@@ -1,25 +1,18 @@
 /**
  * Wildlife & Creature Simulation System for The Drifting Land.
- * Implements 8 original species:
- * - Cloudgrazer (Gentle meadow ruminant)
- * - Emberfox (Agile curious fox with flame tail)
- * - Glasswing (Translucent fluttering blossom avian)
- * - Mossback (Ancient slow-moving tortoise covered in living flora)
- * - Storm Ray (High-altitude aerial manta soaring in thermals)
- * - Glowhare (Bioluminescent hopping critter, active dusk/night)
- * - Rift Stalker (Hostile predatory quadruped near spatial rift)
- * - Moon Deer (Ethereal luminescent stag appearing at night)
- *
- * Adheres to:
- * - Entity caps & lightweight distant simulation (>60m simplified step)
- * - Habitat constraints & time-dependent behaviors
- * - Low-occlusion interaction prompts and drops
+ * Implements 8 original species with:
+ * - Deterministic creature IDs + WorldStateStore cooldown/position persistence
+ * - Shared geometries & materials via SharedAssets
+ * - Chunk streaming culling & entity caps from PerformanceGovernor
+ * - Zero per-frame Vector3 allocations
  */
 
 import * as THREE from 'three';
 import { InventorySystem } from './inventorySystem';
 import { NotificationSystem } from './notificationSystem';
 import { AudioService } from '../services/audio';
+import { SharedAssets } from '../engine/sharedAssets';
+import { WorldStateStore, createSeededRng, hashChunkSeed } from '../services/worldStateStore';
 
 export type WildlifeSpecies =
   | 'Cloudgrazer'
@@ -51,16 +44,40 @@ export interface CreatureInstance {
   harvestItemId: string;
   isHarvested: boolean;
   harvestCooldown: number;
-  // Specific mesh references for procedural animation
-  headMesh?: THREE.Object3D;
-  tailMesh?: THREE.Object3D;
-  leftWing?: THREE.Object3D;
-  rightWing?: THREE.Object3D;
-  legs?: THREE.Object3D[];
+  cooldownUntilMs: number;
   animPhase: number;
   isHostile?: boolean;
   attackCooldown: number;
+  streamVisible: boolean;
+  streamActive: boolean;
+  cappedEnabled: boolean;
 }
+
+const _tmpFleeDir = new THREE.Vector3();
+
+const WILDLIFE_SPAWNS: {
+  id: string;
+  species: WildlifeSpecies;
+  name: string;
+  homeCenter: [number, number];
+  wanderRadius: number;
+  moveSpeed: number;
+}[] = [
+  { id: 'wildlife_cloudgrazer_0', species: 'Cloudgrazer', name: 'Cloudgrazer Matriarch', homeCenter: [6, 0], wanderRadius: 18, moveSpeed: 1.2 },
+  { id: 'wildlife_cloudgrazer_1', species: 'Cloudgrazer', name: 'Young Cloudgrazer', homeCenter: [-8, 8], wanderRadius: 15, moveSpeed: 1.4 },
+  { id: 'wildlife_emberfox_0', species: 'Emberfox', name: 'Emberfox Scout', homeCenter: [-18, 6], wanderRadius: 14, moveSpeed: 3.2 },
+  { id: 'wildlife_emberfox_1', species: 'Emberfox', name: 'Emberfox Vulpine', homeCenter: [18, -12], wanderRadius: 16, moveSpeed: 3.4 },
+  { id: 'wildlife_glasswing_0', species: 'Glasswing', name: 'Shimmering Glasswing', homeCenter: [12, 16], wanderRadius: 12, moveSpeed: 2.0 },
+  { id: 'wildlife_glasswing_1', species: 'Glasswing', name: 'Prismatic Glasswing', homeCenter: [16, 22], wanderRadius: 10, moveSpeed: 2.2 },
+  { id: 'wildlife_mossback_0', species: 'Mossback', name: 'Elder Mossback', homeCenter: [-28, 14], wanderRadius: 12, moveSpeed: 0.5 },
+  { id: 'wildlife_mossback_1', species: 'Mossback', name: 'Mossback Shellback', homeCenter: [-14, 18], wanderRadius: 10, moveSpeed: 0.45 },
+  { id: 'wildlife_stormray_0', species: 'Storm Ray', name: 'Apex Storm Ray', homeCenter: [0, 0], wanderRadius: 35, moveSpeed: 4.5 },
+  { id: 'wildlife_stormray_1', species: 'Storm Ray', name: 'Gliding Storm Ray', homeCenter: [-20, -10], wanderRadius: 30, moveSpeed: 4.0 },
+  { id: 'wildlife_glowhare_0', species: 'Glowhare', name: 'Luminescent Glowhare', homeCenter: [-4, -8], wanderRadius: 12, moveSpeed: 2.8 },
+  { id: 'wildlife_glowhare_1', species: 'Glowhare', name: 'Emerald Glowhare', homeCenter: [8, -16], wanderRadius: 10, moveSpeed: 3.0 },
+  { id: 'wildlife_riftstalker_0', species: 'Rift Stalker', name: 'Voidborn Rift Stalker', homeCenter: [-46, -22], wanderRadius: 12, moveSpeed: 2.6 },
+  { id: 'wildlife_moondeer_0', species: 'Moon Deer', name: 'Celestial Moon Deer', homeCenter: [24, 8], wanderRadius: 16, moveSpeed: 2.8 },
+];
 
 export class WildlifeManager {
   public group: THREE.Group;
@@ -69,6 +86,9 @@ export class WildlifeManager {
   private getTerrainHeight: (x: number, z: number) => number;
   private inventory: InventorySystem;
   private onPlayerDamage?: (damage: number) => void;
+  private regionId: string = 'verdant_reach';
+  private worldStateStore?: WorldStateStore;
+  private entityCap: number = 24;
 
   constructor(
     scene: THREE.Scene,
@@ -86,50 +106,68 @@ export class WildlifeManager {
     scene.add(this.group);
   }
 
-  /**
-   * Spawn initial creature population across designated island habitats
-   */
-  public populate(): void {
-    // 1. Cloudgrazers (Central Plains & Meadows)
-    this.spawnCreature('Cloudgrazer', 'Cloudgrazer Matriarch', [6, 0], 18, 1.2);
-    this.spawnCreature('Cloudgrazer', 'Young Cloudgrazer', [-8, 8], 15, 1.4);
+  public populate(
+    regionId = 'verdant_reach',
+    worldStateStore?: WorldStateStore,
+    entityCap = 24
+  ): void {
+    this.clear();
+    this.regionId = regionId;
+    this.worldStateStore = worldStateStore;
+    this.entityCap = entityCap;
 
-    // 2. Emberfoxes (Rocky Slopes & Forest Edge)
-    this.spawnCreature('Emberfox', 'Emberfox Scout', [-18, 6], 14, 3.2);
-    this.spawnCreature('Emberfox', 'Emberfox Vulpine', [18, -12], 16, 3.4);
+    if (regionId !== 'verdant_reach') {
+      return;
+    }
 
-    // 3. Glasswings (Flower & Nectar Groves)
-    this.spawnCreature('Glasswing', 'Shimmering Glasswing', [12, 16], 12, 2.0);
-    this.spawnCreature('Glasswing', 'Prismatic Glasswing', [16, 22], 10, 2.2);
+    WILDLIFE_SPAWNS.forEach((def, idx) => {
+      this.spawnCreature(
+        def.id,
+        def.species,
+        def.name,
+        def.homeCenter,
+        def.wanderRadius,
+        def.moveSpeed,
+        idx
+      );
+    });
+    this.applyEntityCap();
+  }
 
-    // 4. Mossbacks (Damp River Basin & Elder Grove)
-    this.spawnCreature('Mossback', 'Elder Mossback', [-28, 14], 12, 0.5);
-    this.spawnCreature('Mossback', 'Mossback Shellback', [-14, 18], 10, 0.45);
+  public setEntityCap(cap: number): void {
+    this.entityCap = cap;
+    this.applyEntityCap();
+  }
 
-    // 5. Storm Rays (Aerial high-altitude thermals)
-    this.spawnCreature('Storm Ray', 'Apex Storm Ray', [0, 0], 35, 4.5);
-    this.spawnCreature('Storm Ray', 'Gliding Storm Ray', [-20, -10], 30, 4.0);
-
-    // 6. Glowhares (Verdant Clearings, Nocturnal)
-    this.spawnCreature('Glowhare', 'Luminescent Glowhare', [-4, -8], 12, 2.8);
-    this.spawnCreature('Glowhare', 'Emerald Glowhare', [8, -16], 10, 3.0);
-
-    // 7. Rift Stalkers (Near Shattered Rift, Hostile Prowler)
-    this.spawnCreature('Rift Stalker', 'Voidborn Rift Stalker', [-46, -22], 12, 2.6);
-
-    // 8. Moon Deer (Secluded Twilight Glades)
-    this.spawnCreature('Moon Deer', 'Celestial Moon Deer', [24, 8], 16, 2.8);
+  private applyEntityCap(): void {
+    for (let i = 0; i < this.creatures.length; i++) {
+      const c = this.creatures[i];
+      c.cappedEnabled = i < this.entityCap;
+      c.group.visible = c.cappedEnabled && c.streamVisible;
+    }
   }
 
   private spawnCreature(
+    id: string,
     species: WildlifeSpecies,
     name: string,
     homeCenter: [number, number],
     wanderRadius: number,
-    moveSpeed: number
+    moveSpeed: number,
+    spawnIdx: number
   ): void {
-    const x = homeCenter[0] + (Math.random() - 0.5) * wanderRadius * 0.5;
-    const z = homeCenter[1] + (Math.random() - 0.5) * wanderRadius * 0.5;
+    const worldSeed = this.worldStateStore?.worldSeed || 133742;
+    const rng = createSeededRng(hashChunkSeed(worldSeed, this.regionId, homeCenter[0], homeCenter[1] + spawnIdx));
+
+    const savedState = this.worldStateStore?.getWildlifeState(
+      this.regionId,
+      homeCenter[0],
+      homeCenter[1],
+      id
+    );
+
+    const x = savedState?.pos ? savedState.pos[0] : homeCenter[0] + (rng() - 0.5) * wanderRadius * 0.5;
+    const z = savedState?.pos ? savedState.pos[1] : homeCenter[1] + (rng() - 0.5) * wanderRadius * 0.5;
     const groundY = this.getTerrainHeight(x, z);
     const y = species === 'Storm Ray' ? groundY + 16 : groundY;
 
@@ -186,8 +224,12 @@ export class WildlifeManager {
 
     this.group.add(grp);
 
+    const now = Date.now();
+    const cooldownUntilMs = savedState?.cooldownUntilMs || 0;
+    const remainingSec = cooldownUntilMs > now ? (cooldownUntilMs - now) / 1000 : 0;
+
     const instance: CreatureInstance = {
-      id: `wildlife_${species.toLowerCase()}_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      id,
       species,
       name,
       group: grp,
@@ -195,115 +237,130 @@ export class WildlifeManager {
       velocity: new THREE.Vector3(),
       targetPos: new THREE.Vector3(x, y, z),
       state: 'WANDERING',
-      stateTimer: Math.random() * 4 + 2,
+      stateTimer: rng() * 4 + 2,
       homeCenter,
       wanderRadius,
       moveSpeed,
-      facingYaw: Math.random() * Math.PI * 2,
+      facingYaw: rng() * Math.PI * 2,
       harvestPrompt,
       harvestItemId,
-      isHarvested: false,
-      harvestCooldown: 0,
-      animPhase: Math.random() * Math.PI * 2,
+      isHarvested: remainingSec > 0,
+      harvestCooldown: remainingSec,
+      cooldownUntilMs,
+      animPhase: rng() * Math.PI * 2,
       isHostile,
       attackCooldown: 0,
+      streamVisible: true,
+      streamActive: true,
+      cappedEnabled: spawnIdx < this.entityCap,
     };
 
     this.creatures.push(instance);
   }
 
-  // --- 3D Procedural Mesh Builders ---
+  private mat(key: string, color: number, opts?: Partial<THREE.MeshStandardMaterialParameters>): THREE.MeshStandardMaterial {
+    return SharedAssets.getMaterial(`wl_${key}`, () =>
+      new THREE.MeshStandardMaterial({ color, roughness: 0.85, ...opts })
+    );
+  }
+
+  // --- Shared 3D Procedural Mesh Builders ---
 
   private buildCloudgrazerMesh(grp: THREE.Group): void {
-    const woolMat = new THREE.MeshStandardMaterial({ color: 0xf1efe7, roughness: 0.9 });
-    const hornMat = new THREE.MeshStandardMaterial({ color: 0x5c4033, roughness: 0.6 });
-    const legMat = new THREE.MeshStandardMaterial({ color: 0x8d6e63, roughness: 0.8 });
+    const woolMat = this.mat('cg_wool', 0xf1efe7, { roughness: 0.9 });
+    const hornMat = this.mat('cg_horn', 0x5c4033, { roughness: 0.6 });
+    const legMat = this.mat('cg_leg', 0x8d6e63, { roughness: 0.8 });
 
-    // Body
-    const bodyGeo = new THREE.BoxGeometry(1.6, 1.2, 2.2);
-    bodyGeo.translate(0, 1.2, 0);
+    const bodyGeo = SharedAssets.getGeometry('wl_cg_body', () => {
+      const g = new THREE.BoxGeometry(1.6, 1.2, 2.2);
+      g.translate(0, 1.2, 0);
+      return g;
+    });
     const body = new THREE.Mesh(bodyGeo, woolMat);
     body.castShadow = !this.isSoftwareGl;
     grp.add(body);
 
-    // Head
-    const headGeo = new THREE.BoxGeometry(0.7, 0.7, 0.9);
-    headGeo.translate(0, 1.6, 1.3);
-    const head = new THREE.Mesh(headGeo, woolMat);
-    grp.add(head);
+    const headGeo = SharedAssets.getGeometry('wl_cg_head', () => {
+      const g = new THREE.BoxGeometry(0.7, 0.7, 0.9);
+      g.translate(0, 1.6, 1.3);
+      return g;
+    });
+    grp.add(new THREE.Mesh(headGeo, woolMat));
 
-    // Curved Horns
-    const hornL = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.08, 6, 8, Math.PI), hornMat);
+    const hornGeo = SharedAssets.getGeometry('wl_cg_horn', () => new THREE.TorusGeometry(0.3, 0.08, 6, 8, Math.PI));
+    const hornL = new THREE.Mesh(hornGeo, hornMat);
     hornL.position.set(-0.45, 1.9, 1.2);
     hornL.rotation.y = Math.PI / 2;
     grp.add(hornL);
 
-    const hornR = hornL.clone();
-    hornR.position.x = 0.45;
+    const hornR = new THREE.Mesh(hornGeo, hornMat);
+    hornR.position.set(0.45, 1.9, 1.2);
+    hornR.rotation.y = Math.PI / 2;
     grp.add(hornR);
 
-    // 4 Stout legs
-    const legGeo = new THREE.CylinderGeometry(0.18, 0.22, 0.9, 6);
-    legGeo.translate(0, 0.45, 0);
-    const legPositions = [
-      [-0.6, 0, -0.7],
-      [0.6, 0, -0.7],
-      [-0.6, 0, 0.7],
-      [0.6, 0, 0.7],
-    ];
-    legPositions.forEach((pos) => {
+    const legGeo = SharedAssets.getGeometry('wl_cg_leg', () => {
+      const g = new THREE.CylinderGeometry(0.18, 0.22, 0.9, 6);
+      g.translate(0, 0.45, 0);
+      return g;
+    });
+    const legPositions = [[-0.6, 0, -0.7], [0.6, 0, -0.7], [-0.6, 0, 0.7], [0.6, 0, 0.7]];
+    for (const pos of legPositions) {
       const leg = new THREE.Mesh(legGeo, legMat);
       leg.position.set(pos[0], pos[1], pos[2]);
       grp.add(leg);
-    });
+    }
   }
 
   private buildEmberfoxMesh(grp: THREE.Group): void {
-    const foxMat = new THREE.MeshStandardMaterial({ color: 0xe65100, roughness: 0.7 });
-    const bibMat = new THREE.MeshStandardMaterial({ color: 0xfff8e1, roughness: 0.8 });
-    const emberMat = new THREE.MeshStandardMaterial({
-      color: 0xff7043,
-      emissive: 0xff3d00,
-      emissiveIntensity: 0.85,
-      roughness: 0.4,
-    });
+    const foxMat = this.mat('ef_fox', 0xe65100, { roughness: 0.7 });
+    const bibMat = this.mat('ef_bib', 0xfff8e1, { roughness: 0.8 });
+    const emberMat = this.mat('ef_ember', 0xff7043, { emissive: 0xff3d00, emissiveIntensity: 0.85, roughness: 0.4 });
 
-    // Sleek body
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.4, 0.9), foxMat);
+    const body = new THREE.Mesh(
+      SharedAssets.getGeometry('wl_ef_body', () => new THREE.BoxGeometry(0.5, 0.4, 0.9)),
+      foxMat
+    );
     body.position.set(0, 0.45, 0);
     body.castShadow = !this.isSoftwareGl;
     grp.add(body);
 
-    // White chest bib
-    const bib = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.28, 0.3), bibMat);
+    const bib = new THREE.Mesh(
+      SharedAssets.getGeometry('wl_ef_bib', () => new THREE.BoxGeometry(0.38, 0.28, 0.3)),
+      bibMat
+    );
     bib.position.set(0, 0.48, 0.35);
     grp.add(bib);
 
-    // Head with ears
-    const head = new THREE.Mesh(new THREE.ConeGeometry(0.25, 0.45, 4), foxMat);
+    const head = new THREE.Mesh(
+      SharedAssets.getGeometry('wl_ef_head', () => new THREE.ConeGeometry(0.25, 0.45, 4)),
+      foxMat
+    );
     head.position.set(0, 0.7, 0.55);
     head.rotation.x = Math.PI / 2;
     grp.add(head);
 
-    // Flame tail
-    const tail = new THREE.Mesh(new THREE.DodecahedronGeometry(0.24, 0), emberMat);
+    const tail = new THREE.Mesh(
+      SharedAssets.getGeometry('wl_ef_tail', () => new THREE.DodecahedronGeometry(0.24, 0)),
+      emberMat
+    );
     tail.position.set(0, 0.6, -0.65);
     grp.add(tail);
 
-    // 4 slender legs
-    const legGeo = new THREE.CylinderGeometry(0.06, 0.08, 0.4, 5);
-    legGeo.translate(0, 0.2, 0);
-    [[-0.2, 0, -0.3], [0.2, 0, -0.3], [-0.2, 0, 0.3], [0.2, 0, 0.3]].forEach((pos) => {
+    const legGeo = SharedAssets.getGeometry('wl_ef_leg', () => {
+      const g = new THREE.CylinderGeometry(0.06, 0.08, 0.4, 5);
+      g.translate(0, 0.2, 0);
+      return g;
+    });
+    for (const pos of [[-0.2, 0, -0.3], [0.2, 0, -0.3], [-0.2, 0, 0.3], [0.2, 0, 0.3]]) {
       const leg = new THREE.Mesh(legGeo, foxMat);
       leg.position.set(pos[0], pos[1], pos[2]);
       grp.add(leg);
-    });
+    }
   }
 
   private buildGlasswingMesh(grp: THREE.Group): void {
-    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x06b6d4, roughness: 0.3 });
-    const wingMat = new THREE.MeshStandardMaterial({
-      color: 0xa5f3fc,
+    const bodyMat = this.mat('gw_body', 0x06b6d4, { roughness: 0.3 });
+    const wingMat = this.mat('gw_wing', 0xa5f3fc, {
       emissive: 0x0891b2,
       emissiveIntensity: 0.5,
       transparent: true,
@@ -311,14 +368,15 @@ export class WildlifeManager {
       roughness: 0.1,
     });
 
-    // Slender body
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.04, 0.6, 6), bodyMat);
+    const body = new THREE.Mesh(
+      SharedAssets.getGeometry('wl_gw_body', () => new THREE.CylinderGeometry(0.08, 0.04, 0.6, 6)),
+      bodyMat
+    );
     body.rotation.x = Math.PI / 2;
     body.position.y = 1.0;
     grp.add(body);
 
-    // Dual shimmering wings
-    const wingGeo = new THREE.PlaneGeometry(0.8, 0.45);
+    const wingGeo = SharedAssets.getGeometry('wl_gw_wing', () => new THREE.PlaneGeometry(0.8, 0.45));
     const wingL = new THREE.Mesh(wingGeo, wingMat);
     wingL.position.set(-0.4, 1.05, 0);
     wingL.rotation.x = Math.PI / 2;
@@ -331,86 +389,90 @@ export class WildlifeManager {
   }
 
   private buildMossbackMesh(grp: THREE.Group): void {
-    const shellMat = new THREE.MeshStandardMaterial({ color: 0x2e7d32, roughness: 0.9 });
-    const skinMat = new THREE.MeshStandardMaterial({ color: 0x4e342e, roughness: 0.85 });
+    const shellMat = this.mat('mb_shell', 0x2e7d32, { roughness: 0.9 });
+    const skinMat = this.mat('mb_skin', 0x4e342e, { roughness: 0.85 });
 
-    // Domed shell
-    const shell = new THREE.Mesh(new THREE.SphereGeometry(1.0, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2), shellMat);
+    const shell = new THREE.Mesh(
+      SharedAssets.getGeometry('wl_mb_shell', () => new THREE.SphereGeometry(1.0, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2)),
+      shellMat
+    );
     shell.scale.set(1.1, 0.7, 1.3);
     shell.position.y = 0.3;
     shell.castShadow = !this.isSoftwareGl;
     grp.add(shell);
 
-    // Head
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.25, 0.45), skinMat);
+    const head = new THREE.Mesh(
+      SharedAssets.getGeometry('wl_mb_head', () => new THREE.BoxGeometry(0.35, 0.25, 0.45)),
+      skinMat
+    );
     head.position.set(0, 0.4, 1.2);
     grp.add(head);
 
-    // 4 squat legs
-    const legGeo = new THREE.CylinderGeometry(0.2, 0.25, 0.35, 6);
-    legGeo.translate(0, 0.17, 0);
-    [[-0.7, 0, -0.6], [0.7, 0, -0.6], [-0.7, 0, 0.6], [0.7, 0, 0.6]].forEach((pos) => {
+    const legGeo = SharedAssets.getGeometry('wl_mb_leg', () => {
+      const g = new THREE.CylinderGeometry(0.2, 0.25, 0.35, 6);
+      g.translate(0, 0.17, 0);
+      return g;
+    });
+    for (const pos of [[-0.7, 0, -0.6], [0.7, 0, -0.6], [-0.7, 0, 0.6], [0.7, 0, 0.6]]) {
       const leg = new THREE.Mesh(legGeo, skinMat);
       leg.position.set(pos[0], pos[1], pos[2]);
       grp.add(leg);
-    });
+    }
   }
 
   private buildStormRayMesh(grp: THREE.Group): void {
-    const rayMat = new THREE.MeshStandardMaterial({
-      color: 0x1e293b,
-      roughness: 0.5,
-      metalness: 0.2,
-    });
-    const glowMat = new THREE.MeshStandardMaterial({
-      color: 0x38bdf8,
-      emissive: 0x0284c7,
-      emissiveIntensity: 0.8,
-      roughness: 0.2,
-    });
+    const rayMat = this.mat('sr_body', 0x1e293b, { roughness: 0.5, metalness: 0.2 });
+    const glowMat = this.mat('sr_glow', 0x38bdf8, { emissive: 0x0284c7, emissiveIntensity: 0.8, roughness: 0.2 });
 
-    // Manta wing body (wingspan ~3.6m)
-    const bodyGeo = new THREE.ConeGeometry(1.8, 0.4, 4);
-    bodyGeo.scale(1.8, 1, 0.8);
+    const bodyGeo = SharedAssets.getGeometry('wl_sr_body', () => {
+      const g = new THREE.ConeGeometry(1.8, 0.4, 4);
+      g.scale(1.8, 1, 0.8);
+      return g;
+    });
     const body = new THREE.Mesh(bodyGeo, rayMat);
     body.rotation.y = Math.PI / 4;
     grp.add(body);
 
-    // Glowing electric edges
-    const glowL = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 2.8, 4), glowMat);
+    const glowL = new THREE.Mesh(
+      SharedAssets.getGeometry('wl_sr_edge', () => new THREE.CylinderGeometry(0.04, 0.04, 2.8, 4)),
+      glowMat
+    );
     glowL.rotation.z = Math.PI / 2;
     glowL.position.y = 0.05;
     grp.add(glowL);
 
-    // Trailing whip tail
-    const tail = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.01, 2.5, 4), glowMat);
+    const tail = new THREE.Mesh(
+      SharedAssets.getGeometry('wl_sr_tail', () => new THREE.CylinderGeometry(0.04, 0.01, 2.5, 4)),
+      glowMat
+    );
     tail.rotation.x = Math.PI / 2;
     tail.position.set(0, 0, -1.5);
     grp.add(tail);
   }
 
   private buildGlowhareMesh(grp: THREE.Group): void {
-    const furMat = new THREE.MeshStandardMaterial({
-      color: 0xa7f3d0,
-      emissive: 0x10b981,
-      emissiveIntensity: 0.45,
-      roughness: 0.7,
-    });
+    const furMat = this.mat('gh_fur', 0xa7f3d0, { emissive: 0x10b981, emissiveIntensity: 0.45, roughness: 0.7 });
 
-    // Body
-    const body = new THREE.Mesh(new THREE.SphereGeometry(0.25, 6, 6), furMat);
+    const body = new THREE.Mesh(
+      SharedAssets.getGeometry('wl_gh_body', () => new THREE.SphereGeometry(0.25, 6, 6)),
+      furMat
+    );
     body.scale.set(0.9, 0.9, 1.2);
     body.position.y = 0.25;
     grp.add(body);
 
-    // Head
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.18, 6, 6), furMat);
+    const head = new THREE.Mesh(
+      SharedAssets.getGeometry('wl_gh_head', () => new THREE.SphereGeometry(0.18, 6, 6)),
+      furMat
+    );
     head.position.set(0, 0.4, 0.25);
     grp.add(head);
 
-    // Long ears
-    const earGeo = new THREE.CylinderGeometry(0.03, 0.05, 0.3, 4);
-    earGeo.translate(0, 0.15, 0);
+    const earGeo = SharedAssets.getGeometry('wl_gh_ear', () => {
+      const g = new THREE.CylinderGeometry(0.03, 0.05, 0.3, 4);
+      g.translate(0, 0.15, 0);
+      return g;
+    });
     const earL = new THREE.Mesh(earGeo, furMat);
     earL.position.set(-0.08, 0.5, 0.2);
     earL.rotation.z = -0.15;
@@ -423,133 +485,186 @@ export class WildlifeManager {
   }
 
   private buildRiftStalkerMesh(grp: THREE.Group): void {
-    const shadowMat = new THREE.MeshStandardMaterial({
-      color: 0x180c24,
-      roughness: 0.6,
-      metalness: 0.4,
-    });
-    const riftMat = new THREE.MeshStandardMaterial({
-      color: 0xc084fc,
-      emissive: 0x9333ea,
-      emissiveIntensity: 0.9,
-    });
+    const shadowMat = this.mat('rs_shadow', 0x180c24, { roughness: 0.6, metalness: 0.4 });
+    const riftMat = this.mat('rs_rift', 0xc084fc, { emissive: 0x9333ea, emissiveIntensity: 0.9 });
 
-    // Sleek predatory torso
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.55, 1.6), shadowMat);
+    const body = new THREE.Mesh(
+      SharedAssets.getGeometry('wl_rs_body', () => new THREE.BoxGeometry(0.7, 0.55, 1.6)),
+      shadowMat
+    );
     body.position.y = 0.65;
     body.castShadow = !this.isSoftwareGl;
     grp.add(body);
 
-    // Spines along back
+    const spineGeo = SharedAssets.getGeometry('wl_rs_spine', () => new THREE.ConeGeometry(0.08, 0.35, 4));
     for (let i = -0.5; i <= 0.5; i += 0.3) {
-      const spine = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.35, 4), riftMat);
+      const spine = new THREE.Mesh(spineGeo, riftMat);
       spine.position.set(0, 1.05, i);
       grp.add(spine);
     }
 
-    // Fierce head with glowing eyes
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.35, 0.55), shadowMat);
+    const head = new THREE.Mesh(
+      SharedAssets.getGeometry('wl_rs_head', () => new THREE.BoxGeometry(0.45, 0.35, 0.55)),
+      shadowMat
+    );
     head.position.set(0, 0.85, 0.95);
     grp.add(head);
 
-    const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.05, 4, 4), riftMat);
+    const eyeGeo = SharedAssets.getGeometry('wl_rs_eye', () => new THREE.SphereGeometry(0.05, 4, 4));
+    const eyeL = new THREE.Mesh(eyeGeo, riftMat);
     eyeL.position.set(-0.16, 0.92, 1.2);
     grp.add(eyeL);
 
-    const eyeR = new THREE.Mesh(new THREE.SphereGeometry(0.05, 4, 4), riftMat);
+    const eyeR = new THREE.Mesh(eyeGeo, riftMat);
     eyeR.position.set(0.16, 0.92, 1.2);
     grp.add(eyeR);
 
-    // 4 predatory legs
-    const legGeo = new THREE.CylinderGeometry(0.1, 0.08, 0.65, 5);
-    legGeo.translate(0, 0.32, 0);
-    [[-0.35, 0, -0.6], [0.35, 0, -0.6], [-0.35, 0, 0.6], [0.35, 0, 0.6]].forEach((pos) => {
+    const legGeo = SharedAssets.getGeometry('wl_rs_leg', () => {
+      const g = new THREE.CylinderGeometry(0.1, 0.08, 0.65, 5);
+      g.translate(0, 0.32, 0);
+      return g;
+    });
+    for (const pos of [[-0.35, 0, -0.6], [0.35, 0, -0.6], [-0.35, 0, 0.6], [0.35, 0, 0.6]]) {
       const leg = new THREE.Mesh(legGeo, shadowMat);
       leg.position.set(pos[0], pos[1], pos[2]);
       grp.add(leg);
-    });
+    }
   }
 
   private buildMoonDeerMesh(grp: THREE.Group): void {
-    const peltMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.7 });
-    const antlerMat = new THREE.MeshStandardMaterial({
-      color: 0xbae6fd,
-      emissive: 0x38bdf8,
-      emissiveIntensity: 0.85,
-    });
+    const peltMat = this.mat('md_pelt', 0x94a3b8, { roughness: 0.7 });
+    const antlerMat = this.mat('md_antler', 0xbae6fd, { emissive: 0x38bdf8, emissiveIntensity: 0.85 });
 
-    // Body
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 1.6), peltMat);
+    const body = new THREE.Mesh(
+      SharedAssets.getGeometry('wl_md_body', () => new THREE.BoxGeometry(0.8, 0.8, 1.6)),
+      peltMat
+    );
     body.position.y = 1.2;
     body.castShadow = !this.isSoftwareGl;
     grp.add(body);
 
-    // Slender neck & head
-    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.28, 0.8, 6), peltMat);
+    const neck = new THREE.Mesh(
+      SharedAssets.getGeometry('wl_md_neck', () => new THREE.CylinderGeometry(0.2, 0.28, 0.8, 6)),
+      peltMat
+    );
     neck.position.set(0, 1.7, 0.6);
     neck.rotation.x = -Math.PI / 6;
     grp.add(neck);
 
-    const head = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.5, 5), peltMat);
+    const head = new THREE.Mesh(
+      SharedAssets.getGeometry('wl_md_head', () => new THREE.ConeGeometry(0.22, 0.5, 5)),
+      peltMat
+    );
     head.position.set(0, 2.1, 0.8);
     head.rotation.x = Math.PI / 2;
     grp.add(head);
 
-    // Luminescent Antlers
-    const antlerL = new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.05, 4, 6, Math.PI * 0.8), antlerMat);
+    const antlerGeo = SharedAssets.getGeometry('wl_md_antler', () => new THREE.TorusGeometry(0.4, 0.05, 4, 6, Math.PI * 0.8));
+    const antlerL = new THREE.Mesh(antlerGeo, antlerMat);
     antlerL.position.set(-0.25, 2.4, 0.7);
     antlerL.rotation.y = Math.PI / 4;
     grp.add(antlerL);
 
-    const antlerR = antlerL.clone();
-    antlerR.position.x = 0.25;
+    const antlerR = new THREE.Mesh(antlerGeo, antlerMat);
+    antlerR.position.set(0.25, 2.4, 0.7);
     antlerR.rotation.y = -Math.PI / 4;
     grp.add(antlerR);
 
-    // 4 tall slender legs
-    const legGeo = new THREE.CylinderGeometry(0.08, 0.08, 1.1, 5);
-    legGeo.translate(0, 0.55, 0);
-    [[-0.32, 0, -0.6], [0.32, 0, -0.6], [-0.32, 0, 0.6], [0.32, 0, 0.6]].forEach((pos) => {
+    const legGeo = SharedAssets.getGeometry('wl_md_leg', () => {
+      const g = new THREE.CylinderGeometry(0.08, 0.08, 1.1, 5);
+      g.translate(0, 0.55, 0);
+      return g;
+    });
+    for (const pos of [[-0.32, 0, -0.6], [0.32, 0, -0.6], [-0.32, 0, 0.6], [0.32, 0, 0.6]]) {
       const leg = new THREE.Mesh(legGeo, peltMat);
       leg.position.set(pos[0], pos[1], pos[2]);
       grp.add(leg);
-    });
+    }
   }
 
   /**
-   * Main simulation update loop
+   * Sync visibility and active simulation state with chunk streaming
    */
-  public update(dt: number, totalTime: number, playerPos: THREE.Vector3, timeState: { isRedMoon: boolean }): void {
-    const cappedDt = Math.min(dt, 0.1);
+  public syncStreaming(
+    isVisible: (x: number, z: number) => boolean,
+    isActive: (x: number, z: number) => boolean
+  ): void {
+    for (let i = 0; i < this.creatures.length; i++) {
+      const c = this.creatures[i];
+      const nextVis = isVisible(c.position.x, c.position.z);
+      const nextAct = isActive(c.position.x, c.position.z);
 
-    this.creatures.forEach((c) => {
-      c.animPhase += cappedDt * 2.5;
+      if (c.streamVisible && !nextVis && this.worldStateStore) {
+        this.worldStateStore.setWildlifeState(
+          this.regionId,
+          c.homeCenter[0],
+          c.homeCenter[1],
+          c.id,
+          c.cooldownUntilMs,
+          [c.position.x, c.position.z]
+        );
+      }
+
+      c.streamVisible = nextVis;
+      c.streamActive = nextAct;
+      c.group.visible = c.cappedEnabled && nextVis;
+    }
+  }
+
+  public flushStateToStore(): void {
+    if (!this.worldStateStore) return;
+    for (const c of this.creatures) {
+      this.worldStateStore.setWildlifeState(
+        this.regionId,
+        c.homeCenter[0],
+        c.homeCenter[1],
+        c.id,
+        c.cooldownUntilMs,
+        [c.position.x, c.position.z]
+      );
+    }
+  }
+
+  public update(dt: number, totalTime: number, playerPos: THREE.Vector3, _timeState: { isRedMoon: boolean }): void {
+    const cappedDt = Math.min(dt, 0.12);
+
+    for (let i = 0; i < this.creatures.length; i++) {
+      const c = this.creatures[i];
+      if (!c.cappedEnabled) continue;
+
       if (c.harvestCooldown > 0) {
         c.harvestCooldown = Math.max(0, c.harvestCooldown - cappedDt);
-        if (c.harvestCooldown <= 0) c.isHarvested = false;
+        if (c.harvestCooldown <= 0) {
+          c.isHarvested = false;
+          c.cooldownUntilMs = 0;
+        }
       }
       if (c.attackCooldown > 0) {
         c.attackCooldown = Math.max(0, c.attackCooldown - cappedDt);
       }
 
-      const distToPlayer = c.position.distanceTo(playerPos);
+      // Skip unloaded or far chunks completely
+      if (!c.streamVisible) continue;
 
-      // Lightweight distant simulation (>60m)
-      if (distToPlayer > 60) {
+      const distSqToPlayer = c.position.distanceToSquared(playerPos);
+
+      // Simplified distant simulation (> 55m or not in ACTIVE chunk)
+      if (!c.streamActive || distSqToPlayer > 55 * 55) {
         c.stateTimer -= cappedDt;
         if (c.stateTimer <= 0) {
-          c.stateTimer = 4.0;
+          c.stateTimer = 4.5;
           const rx = c.homeCenter[0] + (Math.random() - 0.5) * c.wanderRadius;
           const rz = c.homeCenter[1] + (Math.random() - 0.5) * c.wanderRadius;
           c.position.x = rx;
           c.position.z = rz;
-          c.position.y = this.getTerrainHeight(rx, rz);
-          c.group.position.copy(c.position);
+          c.position.y = c.species === 'Storm Ray' ? this.getTerrainHeight(rx, rz) + 16 : this.getTerrainHeight(rx, rz);
         }
-        return;
+        continue;
       }
 
-      // Hostile Rift Stalker AI: Aggro and stalk toward player
+      c.animPhase += cappedDt * 2.5;
+      const distToPlayer = Math.sqrt(distSqToPlayer);
+
       if (c.isHostile && distToPlayer < 12) {
         c.state = 'STALKING';
         c.targetPos.copy(playerPos);
@@ -562,12 +677,10 @@ export class WildlifeManager {
           NotificationSystem.notify('Rift Stalker Strike', 'Rift Stalker swiped! -12 Health', 'danger', 3000);
         }
       } else if (c.species === 'Emberfox' && distToPlayer < 6.5) {
-        // Flee from player if too close
         c.state = 'FLEEING';
-        const fleeDir = new THREE.Vector3().subVectors(c.position, playerPos).setY(0).normalize();
-        c.targetPos.copy(c.position).addScaledVector(fleeDir, 8);
+        _tmpFleeDir.subVectors(c.position, playerPos).setY(0).normalize();
+        c.targetPos.copy(c.position).addScaledVector(_tmpFleeDir, 8);
       } else {
-        // Standard state machine
         c.stateTimer -= cappedDt;
         if (c.stateTimer <= 0) {
           if (c.state === 'WANDERING') {
@@ -576,7 +689,6 @@ export class WildlifeManager {
           } else {
             c.state = 'WANDERING';
             c.stateTimer = Math.random() * 5 + 3;
-            // Pick new target within habitat radius
             const ang = Math.random() * Math.PI * 2;
             const dist = Math.random() * c.wanderRadius;
             const tx = c.homeCenter[0] + Math.cos(ang) * dist;
@@ -587,7 +699,6 @@ export class WildlifeManager {
         }
       }
 
-      // Movement execution
       if (c.state === 'WANDERING' || c.state === 'FLEEING' || c.state === 'STALKING') {
         const dx = c.targetPos.x - c.position.x;
         const dz = c.targetPos.z - c.position.z;
@@ -603,7 +714,6 @@ export class WildlifeManager {
           c.position.x += Math.sin(c.facingYaw) * moveDist;
           c.position.z += Math.cos(c.facingYaw) * moveDist;
 
-          // Height adjust
           if (c.species === 'Storm Ray') {
             const desiredY = this.getTerrainHeight(c.position.x, c.position.z) + 16 + Math.sin(totalTime * 0.8) * 1.5;
             c.position.y = THREE.MathUtils.lerp(c.position.y, desiredY, cappedDt * 2);
@@ -617,43 +727,42 @@ export class WildlifeManager {
           } else {
             c.position.y = this.getTerrainHeight(c.position.x, c.position.z);
           }
-          c.group.position.copy(c.position);
         }
       }
 
-      // Idle procedural animations
       if (c.state === 'GRAZING') {
         c.group.rotation.x = Math.sin(totalTime * 2.0) * 0.12;
       } else if (c.species === 'Storm Ray') {
-        // Graceful wing roll
         c.group.rotation.z = Math.sin(totalTime * 1.2) * 0.15;
       } else {
         c.group.rotation.x = 0;
       }
-    });
+    }
   }
 
-  /**
-   * Check for nearby harvestable / interactable creature
-   */
+  public getVisibleCount(): number {
+    let count = 0;
+    for (const c of this.creatures) {
+      if (c.group.visible) count++;
+    }
+    return count;
+  }
+
   public getNearbyCreature(playerPos: THREE.Vector3, maxDist = 3.2): CreatureInstance | null {
     let closest: CreatureInstance | null = null;
-    let minDist = maxDist;
+    let minDistSq = maxDist * maxDist;
 
     for (const c of this.creatures) {
-      if (c.species === 'Storm Ray') continue; // Too high to touch
-      const d = c.position.distanceTo(playerPos);
-      if (d < minDist) {
-        minDist = d;
+      if (!c.group.visible || c.species === 'Storm Ray') continue;
+      const dSq = c.position.distanceToSquared(playerPos);
+      if (dSq < minDistSq) {
+        minDistSq = dSq;
         closest = c;
       }
     }
     return closest;
   }
 
-  /**
-   * Interact / Harvest from creature
-   */
   public harvest(creature: CreatureInstance): boolean {
     if (creature.isHarvested) {
       NotificationSystem.notify(creature.name, 'Needs time to rest before yielding more.', 'info', 2500);
@@ -663,7 +772,16 @@ export class WildlifeManager {
     const added = this.inventory.addItem(creature.harvestItemId, 1, true);
     if (added) {
       creature.isHarvested = true;
-      creature.harvestCooldown = 45; // 45 seconds cooldown
+      creature.harvestCooldown = 45;
+      creature.cooldownUntilMs = Date.now() + 45000;
+      this.worldStateStore?.setWildlifeState(
+        this.regionId,
+        creature.homeCenter[0],
+        creature.homeCenter[1],
+        creature.id,
+        creature.cooldownUntilMs,
+        [creature.position.x, creature.position.z]
+      );
       AudioService.playItemCollect();
       NotificationSystem.notify('Creature Harvest', `Gathered 1x ${creature.harvestItemId.replace(/_/g, ' ')}`, 'item', 3000);
       return true;
@@ -672,22 +790,19 @@ export class WildlifeManager {
   }
 
   public clear(): void {
-    this.dispose();
-  }
-
-  public dispose(): void {
+    this.flushStateToStore();
     while (this.group.children.length > 0) {
       const child = this.group.children[0];
       this.group.remove(child);
-      if ((child as any).geometry) (child as any).geometry.dispose();
-      if ((child as any).material) {
-        if (Array.isArray((child as any).material)) {
-          (child as any).material.forEach((m: any) => m.dispose());
-        } else {
-          (child as any).material.dispose();
-        }
-      }
+      SharedAssets.disposeObject3DSafe(child);
     }
     this.creatures = [];
+  }
+
+  public dispose(): void {
+    this.clear();
+    if (this.group.parent) {
+      this.group.parent.remove(this.group);
+    }
   }
 }

@@ -21,18 +21,25 @@ import {
 } from '../types/game';
 import { REGIONS } from '../data/regions';
 
+import { DEFAULT_WORLD_SEED, getChunkKeyForPos } from './worldStateStore';
+
 const LEGACY_SAVE_KEY = 'the_drifting_land_save_v1';
 const SAVE_SLOT_PREFIX = 'the_drifting_land_slot_';
 const ACTIVE_SLOT_KEY = 'the_drifting_land_active_slot_id';
 const SETTINGS_KEY = 'the_drifting_land_settings_v1';
-const CURRENT_VERSION = 1;
+const CURRENT_VERSION = 2;
 export const MAX_SAVE_SLOTS = 3;
+
+export function isMobileUserAgent(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+}
 
 export const DEFAULT_SETTINGS: GameSettings = {
   graphicsQuality: 'auto',
-  renderDistance: 'medium',
+  renderDistance: isMobileUserAgent() ? 'short' : 'medium',
   fov: 70,
-  shadows: true,
+  shadows: !isMobileUserAgent(),
   soundEnabled: true,
   masterVolume: 0.7,
   sfxVolume: 0.8,
@@ -43,7 +50,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   cameraMode: 'THIRD_PERSON',
   cameraSensitivity: 1.0,
   cameraDistance: 7.5,
-  particleLimit: 400, // Low=150, Medium=400, High=800
+  particleLimit: isMobileUserAgent() ? 150 : 400, // Low=150, Medium=400, High=800
   dayDurationMinutes: 20,
   hudVisibility: 'full',
   mobileButtonSize: 'normal',
@@ -73,6 +80,7 @@ export function createInitialSave(slotId: number = 1): SaveData {
   return {
     version: CURRENT_VERSION,
     timestamp: Date.now(),
+    worldSeed: DEFAULT_WORLD_SEED,
     slotId,
     dimensionId: 'overworld',
     regionId: 'verdant_reach',
@@ -141,6 +149,7 @@ export function createInitialSave(slotId: number = 1): SaveData {
       hearthRekindled: true,
       spokeWithElder: false,
     },
+    regionStates: {},
   };
 }
 
@@ -347,7 +356,7 @@ export class StorageService {
 
     try {
       const save = this.loadSave(slotId);
-      const reg = REGIONS.find((r) => r.id === save.regionId);
+      const reg = REGIONS[save.regionId];
       return {
         slotId,
         isEmpty: false,
@@ -573,9 +582,48 @@ export class StorageService {
       aetherEssence: Number.isFinite(raw.wallet?.aetherEssence) ? raw.wallet.aetherEssence : fallback.wallet.aetherEssence,
     };
 
+    const migratedHarvestedFlora: Record<string, number> =
+      typeof raw.harvestedFlora === 'object' && raw.harvestedFlora !== null ? raw.harvestedFlora : {};
+    const migratedHarvestedDeposits: Record<string, number> =
+      typeof raw.harvestedDeposits === 'object' && raw.harvestedDeposits !== null ? raw.harvestedDeposits : {};
+    const migratedUnlockedDoors: string[] = Array.isArray(raw.unlockedDoors) ? raw.unlockedDoors : [];
+    const migratedDiscoveredChambers: string[] = Array.isArray(raw.discoveredChambers) ? raw.discoveredChambers : [];
+    const migratedCollectedShards: string[] = Array.isArray(raw.collectedShardIds) ? raw.collectedShardIds : [];
+
+    // Migrate v1 top-level world mutations into v2 regionStates if missing
+    let regionStates =
+      typeof raw.regionStates === 'object' && raw.regionStates !== null ? raw.regionStates : {};
+    if (!raw.regionStates || Object.keys(regionStates).length === 0) {
+      const verdantChunks: Record<string, any> = {};
+      if (Object.keys(migratedHarvestedFlora).length > 0) {
+        const ck = getChunkKeyForPos(0, 0);
+        verdantChunks[ck] = { ...(verdantChunks[ck] || {}), harvestedFlora: { ...migratedHarvestedFlora } };
+      }
+      if (Object.keys(migratedHarvestedDeposits).length > 0) {
+        const ck = getChunkKeyForPos(-16, 32);
+        verdantChunks[ck] = { ...(verdantChunks[ck] || {}), harvestedDeposits: { ...migratedHarvestedDeposits } };
+      }
+      if (migratedUnlockedDoors.length > 0) {
+        const ck = getChunkKeyForPos(-38, 22);
+        verdantChunks[ck] = { ...(verdantChunks[ck] || {}), unlockedDoors: [...migratedUnlockedDoors] };
+      }
+      if (migratedDiscoveredChambers.length > 0) {
+        const ck = getChunkKeyForPos(-48, -8);
+        verdantChunks[ck] = { ...(verdantChunks[ck] || {}), discoveredChambers: [...migratedDiscoveredChambers] };
+      }
+      if (migratedCollectedShards.length > 0) {
+        const ck = getChunkKeyForPos(0, 0);
+        verdantChunks[ck] = { ...(verdantChunks[ck] || {}), collectedShards: [...migratedCollectedShards] };
+      }
+      if (Object.keys(verdantChunks).length > 0) {
+        regionStates = { verdant_reach: { chunks: verdantChunks } };
+      }
+    }
+
     return {
       version: CURRENT_VERSION,
       timestamp: typeof raw.timestamp === 'number' ? raw.timestamp : Date.now(),
+      worldSeed: Number.isFinite(raw.worldSeed) ? raw.worldSeed : DEFAULT_WORLD_SEED,
       slotId,
       dimensionId: typeof raw.dimensionId === 'string' ? raw.dimensionId : fallback.dimensionId,
       regionId: typeof raw.regionId === 'string' ? raw.regionId : fallback.regionId,
@@ -586,7 +634,7 @@ export class StorageService {
       wallet,
       inventory: Array.isArray(raw.inventory) ? raw.inventory : fallback.inventory,
       quests: typeof raw.quests === 'object' && raw.quests !== null ? raw.quests : fallback.quests,
-      collectedShardIds: Array.isArray(raw.collectedShardIds) ? raw.collectedShardIds : [],
+      collectedShardIds: migratedCollectedShards,
       beaconStates: typeof raw.beaconStates === 'object' && raw.beaconStates !== null ? raw.beaconStates : fallback.beaconStates,
       activatedCheckpoints: Array.isArray(raw.activatedCheckpoints) ? raw.activatedCheckpoints : fallback.activatedCheckpoints,
       worldTime: {
@@ -604,10 +652,10 @@ export class StorageService {
       },
       settings: { ...DEFAULT_SETTINGS, ...(raw.settings || {}) },
       discoveries: Array.isArray(raw.discoveries) ? raw.discoveries : fallback.discoveries,
-      unlockedDoors: Array.isArray(raw.unlockedDoors) ? raw.unlockedDoors : [],
-      harvestedDeposits: typeof raw.harvestedDeposits === 'object' && raw.harvestedDeposits !== null ? raw.harvestedDeposits : {},
-      harvestedFlora: typeof raw.harvestedFlora === 'object' && raw.harvestedFlora !== null ? raw.harvestedFlora : {},
-      discoveredChambers: Array.isArray(raw.discoveredChambers) ? raw.discoveredChambers : [],
+      unlockedDoors: migratedUnlockedDoors,
+      harvestedDeposits: migratedHarvestedDeposits,
+      harvestedFlora: migratedHarvestedFlora,
+      discoveredChambers: migratedDiscoveredChambers,
       activatedGateways: Array.isArray(raw.activatedGateways) ? raw.activatedGateways : [],
       examinedRecords: Array.isArray(raw.examinedRecords) ? raw.examinedRecords : [],
       hotbarSlots: Array.isArray(raw.hotbarSlots) ? raw.hotbarSlots : fallback.hotbarSlots,
@@ -625,6 +673,7 @@ export class StorageService {
         ? { ...fallback.dimensionProgress, ...raw.dimensionProgress }
         : fallback.dimensionProgress,
       settlementProgress: typeof raw.settlementProgress === 'object' && raw.settlementProgress !== null ? raw.settlementProgress : fallback.settlementProgress,
+      regionStates,
     };
   }
 }

@@ -104,7 +104,7 @@ interface HUDProps {
   onTouchAction: (action: 'jump' | 'dash' | 'interact' | 'sprint' | 'attack', active: boolean) => void;
 }
 
-export const HUD: React.FC<HUDProps> = ({
+export const HUD: React.FC<HUDProps> = React.memo(({
   regionId = 'verdant_reach',
   wallet = { driftCoins: 75, aetherEssence: 0 },
   saveStatus,
@@ -141,9 +141,9 @@ export const HUD: React.FC<HUDProps> = ({
 }) => {
   const [dockCollapsed, setDockCollapsed] = useState(false);
 
-  // Virtual joystick touch tracking
+  // Virtual joystick touch tracking (DOM ref updates prevent React re-renders during drag)
   const joystickRef = useRef<HTMLDivElement | null>(null);
-  const [joystickThumb, setJoystickThumb] = useState({ x: 0, y: 0 });
+  const joystickThumbRef = useRef<HTMLDivElement | null>(null);
   const touchIdRef = useRef<number | null>(null);
   const joyCenterRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
@@ -173,6 +173,9 @@ export const HUD: React.FC<HUDProps> = ({
         y: rect.top + rect.height / 2,
       };
     }
+    if (joystickThumbRef.current) {
+      joystickThumbRef.current.style.transition = 'none';
+    }
   };
 
   const handleJoystickTouchMove = (e: React.TouchEvent) => {
@@ -189,7 +192,9 @@ export const HUD: React.FC<HUDProps> = ({
 
         const thumbX = Math.cos(angle) * clampedDist;
         const thumbY = Math.sin(angle) * clampedDist;
-        setJoystickThumb({ x: thumbX, y: thumbY });
+        if (joystickThumbRef.current) {
+          joystickThumbRef.current.style.transform = `translate3d(${thumbX}px, ${thumbY}px, 0)`;
+        }
 
         // Normalize to -1..1
         onJoystickMove(thumbX / maxDist, thumbY / maxDist);
@@ -203,7 +208,10 @@ export const HUD: React.FC<HUDProps> = ({
     for (let i = 0; i < e.changedTouches.length; i++) {
       if (e.changedTouches[i].identifier === touchIdRef.current) {
         touchIdRef.current = null;
-        setJoystickThumb({ x: 0, y: 0 });
+        if (joystickThumbRef.current) {
+          joystickThumbRef.current.style.transition = 'transform 0.15s ease-out';
+          joystickThumbRef.current.style.transform = 'translate3d(0px, 0px, 0)';
+        }
         onJoystickMove(0, 0);
         break;
       }
@@ -316,10 +324,10 @@ export const HUD: React.FC<HUDProps> = ({
         {/* Top-Center: Crimson Warden Boss Bar (or Camera Badge) */}
         <div className="pointer-events-auto flex flex-col items-center flex-1 max-w-sm sm:max-w-md mx-2">
           {bossState?.active ? (
-            <div className="w-full flex flex-col items-center bg-[#150508]/95 border-2 border-red-600/80 rounded-2xl p-2 sm:p-2.5 shadow-2xl animate-pulse">
+            <div className="w-full flex flex-col items-center bg-[#150508]/95 border-2 border-red-600/80 rounded-2xl p-2 sm:p-2.5 shadow-2xl">
               <div className="w-full flex items-center justify-between text-xs font-mono mb-1">
                 <div className="flex items-center gap-1.5 text-red-300 font-bold tracking-wider">
-                  <Skull className="w-4 h-4 text-red-500 animate-spin" />
+                  <Skull className="w-4 h-4 text-red-500" />
                   <span className="text-[11px] sm:text-xs truncate max-w-[150px] sm:max-w-[220px]">
                     {bossState.name ? bossState.name.toUpperCase() : 'WORLD BOSS'}
                   </span>
@@ -327,7 +335,7 @@ export const HUD: React.FC<HUDProps> = ({
                 <span
                   className={`text-[10px] px-1.5 py-0.2 rounded font-bold ${
                     bossState.phase === 2
-                      ? 'bg-red-800 text-white animate-bounce'
+                      ? 'bg-red-800 text-white'
                       : 'bg-red-950 text-red-300'
                   }`}
                 >
@@ -348,7 +356,7 @@ export const HUD: React.FC<HUDProps> = ({
 
               {/* Attack Warning Banner */}
               {bossState.attackWarning && (
-                <div className="mt-1 flex items-center gap-1 text-[10px] text-amber-300 font-bold uppercase tracking-wider animate-bounce">
+                <div className="mt-1 flex items-center gap-1 text-[10px] text-amber-300 font-bold uppercase tracking-wider">
                   <AlertTriangle className="w-3 h-3 text-red-500" />
                   <span>
                     WARNING: {bossState.attackWarning.type} ({Math.round(bossState.attackWarning.progress * 100)}%)
@@ -379,7 +387,7 @@ export const HUD: React.FC<HUDProps> = ({
             {/* Phase & Clock */}
             <div className="flex items-center gap-1.5 text-[11px] sm:text-xs font-mono">
               {timeState.phase === 'RED_MOON' ? (
-                <Moon className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-red-500 animate-pulse" />
+                <Moon className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-red-500" />
               ) : timeState.phase === 'NIGHT' ? (
                 <Moon className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-indigo-300" />
               ) : (
@@ -461,12 +469,12 @@ export const HUD: React.FC<HUDProps> = ({
             <div
               className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-2xl text-[10px] sm:text-xs font-mono shadow-lg transition-all ${
                 saveStatus.isSaving
-                  ? 'bg-amber-950/90 border border-amber-500/50 text-amber-300 animate-pulse'
+                  ? 'bg-amber-950/90 border border-amber-500/50 text-amber-300'
                   : 'bg-emerald-950/90 border border-emerald-500/50 text-emerald-300'
               }`}
             >
               {saveStatus.isSaving ? (
-                <div className="w-3 h-3 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
+                <div className="w-3 h-3 border-2 border-amber-400 border-t-transparent rounded-full" />
               ) : (
                 <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
               )}
@@ -497,7 +505,7 @@ export const HUD: React.FC<HUDProps> = ({
 
       {/* Middle Interaction Prompt Banner (Centered) */}
       {interactionPrompt && (
-        <div className="my-auto mx-auto pointer-events-auto transition-all animate-bounce">
+        <div className="my-auto mx-auto pointer-events-auto transition-all">
           <button
             onClick={onInteract}
             className="px-5 py-2.5 rounded-full bg-emerald-950/95 border border-emerald-400/80 text-emerald-100 font-medium text-xs sm:text-sm tracking-wide shadow-2xl flex items-center gap-2.5 cursor-pointer hover:bg-emerald-900"
@@ -712,11 +720,9 @@ export const HUD: React.FC<HUDProps> = ({
             className="pointer-events-auto w-24 h-24 rounded-full bg-slate-900/70 border-2 border-slate-700/60 relative flex items-center justify-center touch-none mb-1"
           >
             <div
+              ref={joystickThumbRef}
               className="w-10 h-10 rounded-full bg-emerald-500/80 border border-emerald-300 shadow-lg absolute pointer-events-none"
-              style={{
-                transform: `translate(${joystickThumb.x}px, ${joystickThumb.y}px)`,
-                transition: touchIdRef.current === null ? 'transform 0.15s ease-out' : 'none',
-              }}
+              style={{ transform: 'translate3d(0px, 0px, 0)' }}
             />
           </div>
 
@@ -785,7 +791,6 @@ export const HUD: React.FC<HUDProps> = ({
                 onTouchStart={(e) => {
                   e.stopPropagation();
                   triggerTouchAction('attack', true);
-                  onAttack?.();
                 }}
                 onTouchEnd={(e) => {
                   e.stopPropagation();
@@ -815,4 +820,4 @@ export const HUD: React.FC<HUDProps> = ({
       )}
     </div>
   );
-};
+});

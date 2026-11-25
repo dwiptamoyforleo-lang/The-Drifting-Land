@@ -533,9 +533,44 @@ export interface ObstacleCollider {
   topY?: number;
 }
 
+export type ChunkState = 'ACTIVE' | 'NEAR' | 'UNLOADED';
+
+export interface RegionChunkDelta {
+  harvestedFlora?: Record<string, number>;
+  harvestedDeposits?: Record<string, number>;
+  harvestedEntities?: Record<string, number>;
+  defeatedEnemies?: Record<string, number>;
+  wildlifeCooldowns?: Record<string, number>;
+  wildlifePositions?: Record<string, [number, number]>;
+  unlockedDoors?: string[];
+  discoveredChambers?: string[];
+  activatedStructures?: string[];
+  collectedShards?: string[];
+}
+
+export interface RegionDeltaState {
+  chunks: Record<string, RegionChunkDelta>;
+}
+
+export interface EngineDiagnostics {
+  fps: number;
+  frameTimeMs: number;
+  drawCalls: number;
+  triangles: number;
+  geometries: number;
+  textures: number;
+  activeChunks?: number;
+  nearChunks?: number;
+  unloadedChunks?: number;
+  entityCount?: number;
+  activeQualityTier?: 'low' | 'medium' | 'high';
+  isAutoQuality?: boolean;
+}
+
 export interface SaveData {
   version: number;
   timestamp: number;
+  worldSeed?: number;
   dimensionId: string;
   regionId: string;
   activeCheckpointId?: string;
@@ -579,6 +614,7 @@ export interface SaveData {
     spokeWithElder?: boolean;
     traderStock?: Record<string, number>;
   };
+  regionStates?: Record<string, RegionDeltaState>;
   slotId?: number;
 }
 

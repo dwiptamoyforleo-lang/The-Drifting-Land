@@ -20,6 +20,7 @@ import {
   TraderCatalog,
   PlayerWallet,
   Checkpoint,
+  EngineDiagnostics,
 } from './types/game';
 import { StorageService, createInitialSave } from './services/storage';
 import { GameEngine } from './engine/gameLoop';
@@ -75,13 +76,19 @@ export default function App() {
   const [hasExistingSave, setHasExistingSave] = useState<boolean>(() => StorageService.hasSave());
 
   // Live Performance Diagnostics Telemetry
-  const [diagnostics, setDiagnostics] = useState({
+  const [diagnostics, setDiagnostics] = useState<EngineDiagnostics>({
     fps: 60,
     frameTimeMs: 16.6,
     drawCalls: 0,
     triangles: 0,
     geometries: 0,
     textures: 0,
+    activeChunks: 0,
+    nearChunks: 0,
+    unloadedChunks: 0,
+    entityCount: 0,
+    activeQualityTier: 'medium',
+    isAutoQuality: true,
   });
 
   // In-game dynamic state callbacks
@@ -373,12 +380,20 @@ export default function App() {
     engineRef.current?.devTeleport(x, z);
   };
 
-  // Global F1 or ` hotkey for DevPanel
+  // Global F1 / ` hotkey for DevPanel, and F3 hotkey for Performance Diagnostics overlay
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === '`' || e.code === 'F1') {
         e.preventDefault();
         setIsDevPanelOpen((prev) => !prev);
+      } else if (e.code === 'F3') {
+        e.preventDefault();
+        setSettings((prev) => {
+          const next = { ...prev, showDiagnostics: !prev.showDiagnostics };
+          StorageService.saveSettings(next);
+          engineRef.current?.updateSettings(next);
+          return next;
+        });
       }
     };
     window.addEventListener('keydown', handleKey);
@@ -708,6 +723,7 @@ export default function App() {
         <PerformanceOverlay
           diagnostics={diagnostics}
           settings={settings}
+          isSoftwareGl={engineRef.current?.isSoftwareGl()}
         />
       )}
 

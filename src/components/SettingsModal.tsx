@@ -56,6 +56,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [confirmResetSave, setConfirmResetSave] = useState<boolean>(false);
   const [resetSettingsNotice, setResetSettingsNotice] = useState<string | null>(null);
 
+  const updateSettingsBatch = (partial: Partial<GameSettings>) => {
+    const updated = { ...settings, ...partial };
+    onUpdateSettings(updated);
+    StorageService.saveSettings(updated);
+  };
+
   // Settings update helper that automatically persists
   const updateSetting = <K extends keyof GameSettings>(key: K, val: GameSettings[K]) => {
     const updated = { ...settings, [key]: val };
@@ -248,19 +254,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       key={q}
                       onClick={() => {
                         AudioService.playUiClick();
-                        updateSetting('graphicsQuality', q);
                         if (q === 'low') {
-                          updateSetting('particleLimit', 150);
-                          updateSetting('shadows', false);
-                          updateSetting('renderDistance', 'short');
+                          updateSettingsBatch({
+                            graphicsQuality: 'low',
+                            particleLimit: 140,
+                            shadows: false,
+                            renderDistance: 'short',
+                          });
                         } else if (q === 'medium') {
-                          updateSetting('particleLimit', 400);
-                          updateSetting('shadows', true);
-                          updateSetting('renderDistance', 'medium');
+                          updateSettingsBatch({
+                            graphicsQuality: 'medium',
+                            particleLimit: 360,
+                            shadows: true,
+                            renderDistance: 'medium',
+                          });
                         } else if (q === 'high') {
-                          updateSetting('particleLimit', 800);
-                          updateSetting('shadows', true);
-                          updateSetting('renderDistance', 'far');
+                          updateSettingsBatch({
+                            graphicsQuality: 'high',
+                            particleLimit: 800,
+                            shadows: true,
+                            renderDistance: 'far',
+                          });
+                        } else {
+                          updateSettingsBatch({ graphicsQuality: 'auto' });
                         }
                       }}
                       className={`p-2.5 rounded-xl border text-xs font-mono uppercase tracking-wider transition-all cursor-pointer ${
@@ -274,7 +290,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   ))}
                 </div>
                 <div className="text-[10px] text-slate-400 font-light mt-1">
-                  Auto dynamically detects mobile GPUs, low-power cores, and software rasterizers.
+                  Auto runs the Adaptive Quality Governor: scales quality down below 45 FPS and recovers when sustained above 57 FPS.
                 </div>
               </div>
 
@@ -350,9 +366,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               {/* Performance Diagnostics Overlay */}
               <div className="flex items-center justify-between p-3 rounded-xl bg-slate-900/60 border border-slate-800">
                 <div>
-                  <div className="text-xs font-semibold text-slate-200">Live Engine Diagnostics</div>
+                  <div className="text-xs font-semibold text-slate-200">Live Engine Diagnostics [F3]</div>
                   <div className="text-[10px] text-slate-400 font-light">
-                    Display real-time FPS, frame render time (ms), and GPU draw calls
+                    Display real-time FPS, frame time (ms), draw calls, chunks (A/N/U), and entity counts
                   </div>
                 </div>
                 <button

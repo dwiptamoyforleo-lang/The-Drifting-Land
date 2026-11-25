@@ -1,17 +1,18 @@
 /**
  * Procedural Flora, Plants, and Gathering Nodes Manager for The Drifting Land.
- * Implements Prompt 7:
- * - 7 Original Plants: Lumenvine, Moonbloom, Emberfern, Driftroot, Glassleaf, Whisper Moss, Rift Orchid
- * - Natural Wood Fragments and Basalt River Stones
- * - Dynamic blooming states conditioned by Night, Weather, and Dimensional Events
- * - Tangible 3D procedural meshes (3-8 parts) with harvest animations & regrowth cycles
+ * - Shares geometries, materials, and additive glow sprites via SharedAssets
+ * - Eliminates 12 dynamic PointLights in favor of lightweight glow sprites
+ * - Streams node scene attachment by chunk ACTIVE state while keeping metadata & regrowth timers intact
+ * - Syncs harvested timestamps with both SaveData and WorldStateStore
  */
 
 import * as THREE from 'three';
 import { WeatherType, SaveData } from '../types/game';
 import { InventorySystem } from '../systems/inventorySystem';
 import { AudioService } from '../services/audio';
-import { NotificationSystem } from './../systems/notificationSystem';
+import { NotificationSystem } from '../systems/notificationSystem';
+import { SharedAssets } from './sharedAssets';
+import { WorldStateStore } from '../services/worldStateStore';
 
 export interface FloraNode {
   id: string;
@@ -34,23 +35,26 @@ export interface FloraNode {
   respawnTimeSeconds: number;
   group: THREE.Group;
   meshParts: THREE.Object3D[];
-  light?: THREE.PointLight;
+  glowSprite?: THREE.Sprite;
   isHarvested: boolean;
   harvestTimestamp: number;
   regrowthProgress: number; // 0 to 1
   requiresNight?: boolean;
   requiresDimensional?: boolean;
+  isMounted: boolean;
 }
+
+const _tmpVec3 = new THREE.Vector3();
 
 export class FloraManager {
   public group: THREE.Group;
   public nodes: Map<string, FloraNode> = new Map();
-  private isSoftwareGl: boolean;
+  private worldStateStore: WorldStateStore | null = null;
+  private regionId = 'verdant_reach';
 
-  constructor(scene: THREE.Scene, isSoftwareGl = false) {
+  constructor(scene: THREE.Scene, _isSoftwareGl = false) {
     this.group = new THREE.Group();
     this.group.name = 'world_flora_and_resources';
-    this.isSoftwareGl = isSoftwareGl;
     scene.add(this.group);
   }
 
@@ -59,12 +63,22 @@ export class FloraManager {
    */
   public populate(
     getTerrainHeight: (x: number, z: number) => number,
-    inventory: InventorySystem,
-    save: SaveData
+    _inventory: InventorySystem,
+    save: SaveData,
+    worldStateStore?: WorldStateStore,
+    regionId = 'verdant_reach'
   ): void {
+    this.clear();
+    this.worldStateStore = worldStateStore || null;
+    this.regionId = regionId;
+
+    if (regionId !== 'verdant_reach') {
+      return;
+    }
+
     const savedHarvests = save.harvestedFlora || {};
 
-    // 1. LUMENVINE (Bioluminescent azure vines near water & shaded crags)
+    // 1. LUMENVINE
     const lumenvineLocs: [number, number][] = [
       [20, -18],
       [26, 4],
@@ -72,33 +86,30 @@ export class FloraManager {
       [18, -4],
     ];
     lumenvineLocs.forEach(([x, z], idx) => {
-      const y = getTerrainHeight(x, z);
-      this.createLumenvineNode(`flora_lumenvine_${idx}`, x, y, z, savedHarvests);
+      this.createLumenvineNode(`flora_lumenvine_${idx}`, x, getTerrainHeight(x, z), z, savedHarvests);
     });
 
-    // 2. MOONBLOOM (Nocturnal silver-white flower; blooms only at night)
+    // 2. MOONBLOOM
     const moonbloomLocs: [number, number][] = [
       [-8, 12],
       [-14, -20],
       [16, 16],
     ];
     moonbloomLocs.forEach(([x, z], idx) => {
-      const y = getTerrainHeight(x, z);
-      this.createMoonbloomNode(`flora_moonbloom_${idx}`, x, y, z, savedHarvests);
+      this.createMoonbloomNode(`flora_moonbloom_${idx}`, x, getTerrainHeight(x, z), z, savedHarvests);
     });
 
-    // 3. EMBERFERN (Warm crimson-orange fern on sunward promontory rocks)
+    // 3. EMBERFERN
     const emberfernLocs: [number, number][] = [
       [34, 18],
       [42, 28],
       [26, 34],
     ];
     emberfernLocs.forEach(([x, z], idx) => {
-      const y = getTerrainHeight(x, z);
-      this.createEmberfernNode(`flora_emberfern_${idx}`, x, y, z, savedHarvests);
+      this.createEmberfernNode(`flora_emberfern_${idx}`, x, getTerrainHeight(x, z), z, savedHarvests);
     });
 
-    // 4. DRIFTROOT (Gnarled ancient woody roots near island perimeter)
+    // 4. DRIFTROOT
     const driftrootLocs: [number, number][] = [
       [-36, -26],
       [-44, 12],
@@ -106,22 +117,20 @@ export class FloraManager {
       [-12, 38],
     ];
     driftrootLocs.forEach(([x, z], idx) => {
-      const y = getTerrainHeight(x, z);
-      this.createDriftrootNode(`flora_driftroot_${idx}`, x, y, z, savedHarvests);
+      this.createDriftrootNode(`flora_driftroot_${idx}`, x, getTerrainHeight(x, z), z, savedHarvests);
     });
 
-    // 5. GLASSLEAF (Prismatic translucent crystal succulents)
+    // 5. GLASSLEAF
     const glassleafLocs: [number, number][] = [
       [-18, 30],
       [-30, 8],
       [40, 10],
     ];
     glassleafLocs.forEach(([x, z], idx) => {
-      const y = getTerrainHeight(x, z);
-      this.createGlassleafNode(`flora_glassleaf_${idx}`, x, y, z, savedHarvests);
+      this.createGlassleafNode(`flora_glassleaf_${idx}`, x, getTerrainHeight(x, z), z, savedHarvests);
     });
 
-    // 6. WHISPER MOSS (Velvety damp cyan-green moss on shaded boulders)
+    // 6. WHISPER MOSS
     const whisperMossLocs: [number, number][] = [
       [-28, -14],
       [-32, 24],
@@ -129,21 +138,19 @@ export class FloraManager {
       [4, 30],
     ];
     whisperMossLocs.forEach(([x, z], idx) => {
-      const y = getTerrainHeight(x, z);
-      this.createWhisperMossNode(`flora_whisper_moss_${idx}`, x, y, z, savedHarvests);
+      this.createWhisperMossNode(`flora_whisper_moss_${idx}`, x, getTerrainHeight(x, z), z, savedHarvests);
     });
 
-    // 7. RIFT ORCHID (Deep violet-crimson orchid near western void rift)
+    // 7. RIFT ORCHID
     const riftOrchidLocs: [number, number][] = [
       [-46, -18],
       [-52, -26],
     ];
     riftOrchidLocs.forEach(([x, z], idx) => {
-      const y = getTerrainHeight(x, z);
-      this.createRiftOrchidNode(`flora_rift_orchid_${idx}`, x, y, z, savedHarvests);
+      this.createRiftOrchidNode(`flora_rift_orchid_${idx}`, x, getTerrainHeight(x, z), z, savedHarvests);
     });
 
-    // 8. WOOD FRAGMENTS (Fallen driftwood branches lying along trails)
+    // 8. WOOD FRAGMENTS
     const woodLocs: [number, number][] = [
       [-12, 6],
       [6, -14],
@@ -152,11 +159,10 @@ export class FloraManager {
       [14, 22],
     ];
     woodLocs.forEach(([x, z], idx) => {
-      const y = getTerrainHeight(x, z);
-      this.createWoodFragmentNode(`resource_wood_${idx}`, x, y, z, savedHarvests);
+      this.createWoodFragmentNode(`resource_wood_${idx}`, x, getTerrainHeight(x, z), z, savedHarvests);
     });
 
-    // 9. BASALT STONES (Smooth volcanic river pebbles)
+    // 9. BASALT STONES
     const stoneLocs: [number, number][] = [
       [14, -6],
       [-8, -16],
@@ -165,44 +171,28 @@ export class FloraManager {
       [-24, 16],
     ];
     stoneLocs.forEach(([x, z], idx) => {
-      const y = getTerrainHeight(x, z);
-      this.createStoneDepositNode(`resource_stone_${idx}`, x, y, z, savedHarvests);
+      this.createStoneDepositNode(`resource_stone_${idx}`, x, getTerrainHeight(x, z), z, savedHarvests);
     });
   }
 
-  // --- Plant Node Generators (3-8 parts each) ---
-
-  private createLumenvineNode(
-    id: string,
-    x: number,
-    y: number,
-    z: number,
-    savedHarvests: Record<string, number>
-  ): void {
+  private createLumenvineNode(id: string, x: number, y: number, z: number, savedHarvests: Record<string, number>): void {
     const grp = new THREE.Group();
     grp.position.set(x, y, z);
-
     const parts: THREE.Object3D[] = [];
 
-    // Central mossy base mound
-    const moundGeo = new THREE.CylinderGeometry(0.5, 0.7, 0.25, 7);
-    const moundMat = new THREE.MeshStandardMaterial({ color: 0x1e3a2f, roughness: 0.9 });
+    const moundGeo = SharedAssets.getGeometry('flora_lumen_mound', () => new THREE.CylinderGeometry(0.5, 0.7, 0.25, 7));
+    const moundMat = SharedAssets.getMaterial('flora_lumen_mound_mat', () => new THREE.MeshStandardMaterial({ color: 0x1e3a2f, roughness: 0.9 }));
     const mound = new THREE.Mesh(moundGeo, moundMat);
     mound.position.y = 0.12;
     grp.add(mound);
     parts.push(mound);
 
-    // Twisted glowing vines (4 braided torus/cylinder arches)
-    const vineMat = new THREE.MeshStandardMaterial({
-      color: 0x38bdf8,
-      emissive: 0x0284c7,
-      emissiveIntensity: 0.85,
-      roughness: 0.3,
-    });
-
+    const arcGeo = SharedAssets.getGeometry('flora_lumen_arc', () => new THREE.TorusGeometry(0.45, 0.08, 6, 12, Math.PI));
+    const vineMat = SharedAssets.getMaterial('flora_lumen_vine_mat', () =>
+      new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x0284c7, emissiveIntensity: 0.85, roughness: 0.3 })
+    );
     for (let i = 0; i < 4; i++) {
       const angle = (i * Math.PI) / 2;
-      const arcGeo = new THREE.TorusGeometry(0.45, 0.08, 6, 12, Math.PI);
       const arc = new THREE.Mesh(arcGeo, vineMat);
       arc.position.set(Math.cos(angle) * 0.25, 0.45, Math.sin(angle) * 0.25);
       arc.rotation.y = angle;
@@ -211,70 +201,40 @@ export class FloraManager {
       parts.push(arc);
     }
 
-    // Glowing bud bulb
-    const bulbGeo = new THREE.SphereGeometry(0.22, 8, 8);
-    const bulbMat = new THREE.MeshStandardMaterial({
-      color: 0x7dd3fc,
-      emissive: 0x38bdf8,
-      emissiveIntensity: 1.2,
-      roughness: 0.2,
-    });
+    const bulbGeo = SharedAssets.getGeometry('flora_lumen_bulb', () => new THREE.SphereGeometry(0.22, 8, 8));
+    const bulbMat = SharedAssets.getMaterial('flora_lumen_bulb_mat', () =>
+      new THREE.MeshStandardMaterial({ color: 0x7dd3fc, emissive: 0x38bdf8, emissiveIntensity: 1.2, roughness: 0.2 })
+    );
     const bulb = new THREE.Mesh(bulbGeo, bulbMat);
     bulb.position.y = 0.85;
     grp.add(bulb);
     parts.push(bulb);
 
-    const light = new THREE.PointLight(0x38bdf8, 0.8, 5);
-    light.position.y = 0.85;
-    grp.add(light);
+    const glowSprite = SharedAssets.createGlowSprite(0x38bdf8, 1.9, 0.65);
+    glowSprite.position.y = 0.85;
+    grp.add(glowSprite);
 
-    this.registerNode(
-      id,
-      'Lumenvine',
-      'lumenvine',
-      [x, y, z],
-      'lumenvine_fiber',
-      1,
-      2,
-      3.2,
-      45,
-      grp,
-      parts,
-      savedHarvests,
-      light
-    );
+    this.registerNode(id, 'Lumenvine', 'lumenvine', [x, y, z], 'lumenvine_fiber', 1, 2, 3.2, 45, grp, parts, savedHarvests, glowSprite);
   }
 
-  private createMoonbloomNode(
-    id: string,
-    x: number,
-    y: number,
-    z: number,
-    savedHarvests: Record<string, number>
-  ): void {
+  private createMoonbloomNode(id: string, x: number, y: number, z: number, savedHarvests: Record<string, number>): void {
     const grp = new THREE.Group();
     grp.position.set(x, y, z);
     const parts: THREE.Object3D[] = [];
 
-    // Stem
-    const stemGeo = new THREE.CylinderGeometry(0.06, 0.08, 0.7, 6);
-    const stemMat = new THREE.MeshStandardMaterial({ color: 0x14532d, roughness: 0.8 });
+    const stemGeo = SharedAssets.getGeometry('flora_moon_stem', () => new THREE.CylinderGeometry(0.06, 0.08, 0.7, 6));
+    const stemMat = SharedAssets.getMaterial('flora_moon_stem_mat', () => new THREE.MeshStandardMaterial({ color: 0x14532d, roughness: 0.8 }));
     const stem = new THREE.Mesh(stemGeo, stemMat);
     stem.position.y = 0.35;
     grp.add(stem);
     parts.push(stem);
 
-    // Silver luminescent petals (5 layered cones/ovals)
-    const petalMat = new THREE.MeshStandardMaterial({
-      color: 0xf8fafc,
-      emissive: 0x94a3b8,
-      emissiveIntensity: 0.6,
-      roughness: 0.3,
-    });
-
+    const petalGeo = SharedAssets.getGeometry('flora_moon_petal', () => new THREE.ConeGeometry(0.18, 0.55, 5));
+    const petalMat = SharedAssets.getMaterial('flora_moon_petal_mat', () =>
+      new THREE.MeshStandardMaterial({ color: 0xf8fafc, emissive: 0x94a3b8, emissiveIntensity: 0.6, roughness: 0.3 })
+    );
     for (let p = 0; p < 5; p++) {
       const angle = (p * Math.PI * 2) / 5;
-      const petalGeo = new THREE.ConeGeometry(0.18, 0.55, 5);
       const petal = new THREE.Mesh(petalGeo, petalMat);
       petal.position.set(Math.cos(angle) * 0.15, 0.75, Math.sin(angle) * 0.15);
       petal.rotation.x = 0.35;
@@ -283,62 +243,33 @@ export class FloraManager {
       parts.push(petal);
     }
 
-    // Glowing core stamen
-    const coreMat = new THREE.MeshStandardMaterial({
-      color: 0x38bdf8,
-      emissive: 0x0284c7,
-      emissiveIntensity: 1.0,
-    });
-    const core = new THREE.Mesh(new THREE.SphereGeometry(0.12, 6, 6), coreMat);
+    const coreGeo = SharedAssets.getGeometry('flora_moon_core', () => new THREE.SphereGeometry(0.12, 6, 6));
+    const coreMat = SharedAssets.getMaterial('flora_moon_core_mat', () =>
+      new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x0284c7, emissiveIntensity: 1.0 })
+    );
+    const core = new THREE.Mesh(coreGeo, coreMat);
     core.position.y = 0.75;
     grp.add(core);
     parts.push(core);
 
-    const light = new THREE.PointLight(0xe2e8f0, 0.9, 6);
-    light.position.y = 0.8;
-    grp.add(light);
+    const glowSprite = SharedAssets.createGlowSprite(0xe2e8f0, 2.0, 0.65);
+    glowSprite.position.y = 0.8;
+    grp.add(glowSprite);
 
-    this.registerNode(
-      id,
-      'Moonbloom',
-      'moonbloom',
-      [x, y, z],
-      'moonbloom_petal',
-      1,
-      2,
-      3.2,
-      60,
-      grp,
-      parts,
-      savedHarvests,
-      light,
-      true, // requires night
-      false
-    );
+    this.registerNode(id, 'Moonbloom', 'moonbloom', [x, y, z], 'moonbloom_petal', 1, 2, 3.2, 60, grp, parts, savedHarvests, glowSprite, true, false);
   }
 
-  private createEmberfernNode(
-    id: string,
-    x: number,
-    y: number,
-    z: number,
-    savedHarvests: Record<string, number>
-  ): void {
+  private createEmberfernNode(id: string, x: number, y: number, z: number, savedHarvests: Record<string, number>): void {
     const grp = new THREE.Group();
     grp.position.set(x, y, z);
     const parts: THREE.Object3D[] = [];
 
-    const fernMat = new THREE.MeshStandardMaterial({
-      color: 0xf97316,
-      emissive: 0xc2410c,
-      emissiveIntensity: 0.75,
-      roughness: 0.4,
-    });
-
-    // 6 Radiating warm fronds
+    const frondGeo = SharedAssets.getGeometry('flora_ember_frond', () => new THREE.ConeGeometry(0.16, 0.85, 4));
+    const fernMat = SharedAssets.getMaterial('flora_ember_mat', () =>
+      new THREE.MeshStandardMaterial({ color: 0xf97316, emissive: 0xc2410c, emissiveIntensity: 0.75, roughness: 0.4 })
+    );
     for (let f = 0; f < 6; f++) {
       const angle = (f * Math.PI * 2) / 6;
-      const frondGeo = new THREE.ConeGeometry(0.16, 0.85, 4);
       const frond = new THREE.Mesh(frondGeo, fernMat);
       frond.position.set(Math.cos(angle) * 0.25, 0.45, Math.sin(angle) * 0.25);
       frond.rotation.x = 0.45;
@@ -347,55 +278,31 @@ export class FloraManager {
       parts.push(frond);
     }
 
-    // Central Ember Node
-    const emberMat = new THREE.MeshStandardMaterial({
-      color: 0xfef08a,
-      emissive: 0xf59e0b,
-      emissiveIntensity: 1.2,
-    });
-    const ember = new THREE.Mesh(new THREE.DodecahedronGeometry(0.18, 0), emberMat);
+    const emberGeo = SharedAssets.getGeometry('flora_ember_core', () => new THREE.DodecahedronGeometry(0.18, 0));
+    const emberMat = SharedAssets.getMaterial('flora_ember_core_mat', () =>
+      new THREE.MeshStandardMaterial({ color: 0xfef08a, emissive: 0xf59e0b, emissiveIntensity: 1.2 })
+    );
+    const ember = new THREE.Mesh(emberGeo, emberMat);
     ember.position.y = 0.35;
     grp.add(ember);
     parts.push(ember);
 
-    const light = new THREE.PointLight(0xf97316, 0.75, 5);
-    light.position.y = 0.5;
-    grp.add(light);
+    const glowSprite = SharedAssets.createGlowSprite(0xf97316, 1.8, 0.6);
+    glowSprite.position.y = 0.5;
+    grp.add(glowSprite);
 
-    this.registerNode(
-      id,
-      'Emberfern',
-      'emberfern',
-      [x, y, z],
-      'emberfern_frond',
-      1,
-      3,
-      3.2,
-      45,
-      grp,
-      parts,
-      savedHarvests,
-      light
-    );
+    this.registerNode(id, 'Emberfern', 'emberfern', [x, y, z], 'emberfern_frond', 1, 3, 3.2, 45, grp, parts, savedHarvests, glowSprite);
   }
 
-  private createDriftrootNode(
-    id: string,
-    x: number,
-    y: number,
-    z: number,
-    savedHarvests: Record<string, number>
-  ): void {
+  private createDriftrootNode(id: string, x: number, y: number, z: number, savedHarvests: Record<string, number>): void {
     const grp = new THREE.Group();
     grp.position.set(x, y, z);
     const parts: THREE.Object3D[] = [];
 
-    const barkMat = new THREE.MeshStandardMaterial({ color: 0x5c3a21, roughness: 0.95 });
-
-    // Gnarled root cluster (3 interconnected curved cylinders)
+    const rootGeo = SharedAssets.getGeometry('flora_driftroot_cyl', () => new THREE.CylinderGeometry(0.14, 0.22, 1.1, 6));
+    const barkMat = SharedAssets.getMaterial('flora_driftroot_bark', () => new THREE.MeshStandardMaterial({ color: 0x5c3a21, roughness: 0.95 }));
     for (let r = 0; r < 3; r++) {
       const angle = (r * Math.PI * 2) / 3;
-      const rootGeo = new THREE.CylinderGeometry(0.14, 0.22, 1.1, 6);
       const root = new THREE.Mesh(rootGeo, barkMat);
       root.position.set(Math.cos(angle) * 0.3, 0.4, Math.sin(angle) * 0.3);
       root.rotation.z = 0.35 * Math.cos(angle);
@@ -404,54 +311,35 @@ export class FloraManager {
       parts.push(root);
     }
 
-    // Moss accent patch on root crest
-    const mossMat = new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.9 });
-    const moss = new THREE.Mesh(new THREE.DodecahedronGeometry(0.35, 0), mossMat);
+    const mossGeo = SharedAssets.getGeometry('flora_driftroot_moss', () => new THREE.DodecahedronGeometry(0.35, 0));
+    const mossMat = SharedAssets.getMaterial('flora_driftroot_moss_mat', () => new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.9 }));
+    const moss = new THREE.Mesh(mossGeo, mossMat);
     moss.position.y = 0.8;
     grp.add(moss);
     parts.push(moss);
 
-    this.registerNode(
-      id,
-      'Driftroot',
-      'driftroot',
-      [x, y, z],
-      'driftwood_branch',
-      2,
-      3,
-      3.2,
-      50,
-      grp,
-      parts,
-      savedHarvests
-    );
+    this.registerNode(id, 'Driftroot', 'driftroot', [x, y, z], 'driftwood_branch', 2, 3, 3.2, 50, grp, parts, savedHarvests);
   }
 
-  private createGlassleafNode(
-    id: string,
-    x: number,
-    y: number,
-    z: number,
-    savedHarvests: Record<string, number>
-  ): void {
+  private createGlassleafNode(id: string, x: number, y: number, z: number, savedHarvests: Record<string, number>): void {
     const grp = new THREE.Group();
     grp.position.set(x, y, z);
     const parts: THREE.Object3D[] = [];
 
-    const crystalMat = new THREE.MeshStandardMaterial({
-      color: 0xa5f3fc,
-      emissive: 0x0891b2,
-      emissiveIntensity: 0.5,
-      roughness: 0.1,
-      metalness: 0.9,
-      transparent: true,
-      opacity: 0.85,
-    });
-
-    // 5 Prismatic crystalline succulent petals
+    const leafGeo = SharedAssets.getGeometry('flora_glass_leaf', () => new THREE.ConeGeometry(0.16, 0.75, 4));
+    const crystalMat = SharedAssets.getMaterial('flora_glass_mat', () =>
+      new THREE.MeshStandardMaterial({
+        color: 0xa5f3fc,
+        emissive: 0x0891b2,
+        emissiveIntensity: 0.5,
+        roughness: 0.1,
+        metalness: 0.9,
+        transparent: true,
+        opacity: 0.85,
+      })
+    );
     for (let c = 0; c < 5; c++) {
       const angle = (c * Math.PI * 2) / 5;
-      const leafGeo = new THREE.ConeGeometry(0.16, 0.75, 4);
       const leaf = new THREE.Mesh(leafGeo, crystalMat);
       leaf.position.set(Math.cos(angle) * 0.22, 0.4, Math.sin(angle) * 0.22);
       leaf.rotation.x = 0.3;
@@ -460,100 +348,54 @@ export class FloraManager {
       parts.push(leaf);
     }
 
-    this.registerNode(
-      id,
-      'Glassleaf',
-      'glassleaf',
-      [x, y, z],
-      'glassleaf_shard',
-      1,
-      2,
-      3.2,
-      60,
-      grp,
-      parts,
-      savedHarvests
-    );
+    this.registerNode(id, 'Glassleaf', 'glassleaf', [x, y, z], 'glassleaf_shard', 1, 2, 3.2, 60, grp, parts, savedHarvests);
   }
 
-  private createWhisperMossNode(
-    id: string,
-    x: number,
-    y: number,
-    z: number,
-    savedHarvests: Record<string, number>
-  ): void {
+  private createWhisperMossNode(id: string, x: number, y: number, z: number, savedHarvests: Record<string, number>): void {
     const grp = new THREE.Group();
     grp.position.set(x, y, z);
     const parts: THREE.Object3D[] = [];
 
-    const rockMat = new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.9 });
-    const mossMat = new THREE.MeshStandardMaterial({
-      color: 0x10b981,
-      emissive: 0x047857,
-      emissiveIntensity: 0.35,
-      roughness: 0.85,
-    });
+    const rockGeo = SharedAssets.getGeometry('flora_wmoss_rock', () => new THREE.DodecahedronGeometry(0.65, 0));
+    const rockMat = SharedAssets.getMaterial('flora_wmoss_rock_mat', () => new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.9 }));
+    const patchGeo = SharedAssets.getGeometry('flora_wmoss_patch', () => new THREE.SphereGeometry(0.28, 6, 6));
+    const mossMat = SharedAssets.getMaterial('flora_wmoss_mat', () =>
+      new THREE.MeshStandardMaterial({ color: 0x10b981, emissive: 0x047857, emissiveIntensity: 0.35, roughness: 0.85 })
+    );
 
-    // Host stone
-    const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.65, 0), rockMat);
+    const rock = new THREE.Mesh(rockGeo, rockMat);
     rock.position.y = 0.35;
     grp.add(rock);
     parts.push(rock);
 
-    // 3 Moss velvet patches
     for (let m = 0; m < 3; m++) {
-      const patch = new THREE.Mesh(new THREE.SphereGeometry(0.28, 6, 6), mossMat);
+      const patch = new THREE.Mesh(patchGeo, mossMat);
       patch.position.set(0.2 * (m - 1), 0.7, 0.15 * ((m % 2) * 2 - 1));
       grp.add(patch);
       parts.push(patch);
     }
 
-    this.registerNode(
-      id,
-      'Whisper Moss',
-      'whisper_moss',
-      [x, y, z],
-      'whisper_moss_clump',
-      2,
-      3,
-      3.2,
-      40,
-      grp,
-      parts,
-      savedHarvests
-    );
+    this.registerNode(id, 'Whisper Moss', 'whisper_moss', [x, y, z], 'whisper_moss_clump', 2, 3, 3.2, 40, grp, parts, savedHarvests);
   }
 
-  private createRiftOrchidNode(
-    id: string,
-    x: number,
-    y: number,
-    z: number,
-    savedHarvests: Record<string, number>
-  ): void {
+  private createRiftOrchidNode(id: string, x: number, y: number, z: number, savedHarvests: Record<string, number>): void {
     const grp = new THREE.Group();
     grp.position.set(x, y, z);
     const parts: THREE.Object3D[] = [];
 
-    // Dark obsidian stem
-    const stemMat = new THREE.MeshStandardMaterial({ color: 0x18181b, roughness: 0.8 });
-    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 0.9, 6), stemMat);
+    const stemGeo = SharedAssets.getGeometry('flora_orchid_stem', () => new THREE.CylinderGeometry(0.08, 0.1, 0.9, 6));
+    const stemMat = SharedAssets.getMaterial('flora_orchid_stem_mat', () => new THREE.MeshStandardMaterial({ color: 0x18181b, roughness: 0.8 }));
+    const stem = new THREE.Mesh(stemGeo, stemMat);
     stem.position.y = 0.45;
     grp.add(stem);
     parts.push(stem);
 
-    // Deep violet-crimson petals
-    const petalMat = new THREE.MeshStandardMaterial({
-      color: 0x7c3aed,
-      emissive: 0x9333ea,
-      emissiveIntensity: 0.85,
-      roughness: 0.25,
-    });
-
+    const petalGeo = SharedAssets.getGeometry('flora_orchid_petal', () => new THREE.ConeGeometry(0.25, 0.8, 5));
+    const petalMat = SharedAssets.getMaterial('flora_orchid_petal_mat', () =>
+      new THREE.MeshStandardMaterial({ color: 0x7c3aed, emissive: 0x9333ea, emissiveIntensity: 0.85, roughness: 0.25 })
+    );
     for (let r = 0; r < 4; r++) {
       const angle = (r * Math.PI) / 2;
-      const petalGeo = new THREE.ConeGeometry(0.25, 0.8, 5);
       const petal = new THREE.Mesh(petalGeo, petalMat);
       petal.position.set(Math.cos(angle) * 0.2, 0.95, Math.sin(angle) * 0.2);
       petal.rotation.x = 0.5;
@@ -562,55 +404,34 @@ export class FloraManager {
       parts.push(petal);
     }
 
-    // Void core spark
-    const coreMat = new THREE.MeshStandardMaterial({
-      color: 0xec4899,
-      emissive: 0xdb2777,
-      emissiveIntensity: 1.3,
-    });
-    const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.18, 0), coreMat);
+    const coreGeo = SharedAssets.getGeometry('flora_orchid_core', () => new THREE.OctahedronGeometry(0.18, 0));
+    const coreMat = SharedAssets.getMaterial('flora_orchid_core_mat', () =>
+      new THREE.MeshStandardMaterial({ color: 0xec4899, emissive: 0xdb2777, emissiveIntensity: 1.3 })
+    );
+    const core = new THREE.Mesh(coreGeo, coreMat);
     core.position.y = 0.95;
     grp.add(core);
     parts.push(core);
 
-    const light = new THREE.PointLight(0xa855f7, 1.2, 8);
-    light.position.y = 1.0;
-    grp.add(light);
+    const glowSprite = SharedAssets.createGlowSprite(0xa855f7, 2.3, 0.72);
+    glowSprite.position.y = 1.0;
+    grp.add(glowSprite);
 
-    this.registerNode(
-      id,
-      'Rift Orchid',
-      'rift_orchid',
-      [x, y, z],
-      'rift_orchid_blossom',
-      1,
-      2,
-      3.4,
-      90,
-      grp,
-      parts,
-      savedHarvests,
-      light,
-      false,
-      true // requires dimensional disturbance or red moon
-    );
+    this.registerNode(id, 'Rift Orchid', 'rift_orchid', [x, y, z], 'rift_orchid_blossom', 1, 2, 3.4, 90, grp, parts, savedHarvests, glowSprite, false, true);
   }
 
-  private createWoodFragmentNode(
-    id: string,
-    x: number,
-    y: number,
-    z: number,
-    savedHarvests: Record<string, number>
-  ): void {
+  private createWoodFragmentNode(id: string, x: number, y: number, z: number, savedHarvests: Record<string, number>): void {
     const grp = new THREE.Group();
     grp.position.set(x, y, z);
     const parts: THREE.Object3D[] = [];
 
-    const woodMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.9 });
+    const branchGeo = SharedAssets.getGeometry('flora_wood_branch', () => {
+      const g = new THREE.CylinderGeometry(0.08, 0.12, 1.2, 5);
+      g.rotateZ(Math.PI / 2.2);
+      return g;
+    });
+    const woodMat = SharedAssets.getMaterial('flora_wood_mat', () => new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.9 }));
     for (let b = 0; b < 2; b++) {
-      const branchGeo = new THREE.CylinderGeometry(0.08, 0.12, 1.2, 5);
-      branchGeo.rotateZ(Math.PI / 2.2);
       const branch = new THREE.Mesh(branchGeo, woodMat);
       branch.position.set(b * 0.25, 0.08, b * 0.15);
       branch.rotation.y = b * 0.8;
@@ -618,56 +439,27 @@ export class FloraManager {
       parts.push(branch);
     }
 
-    this.registerNode(
-      id,
-      'Wood Fragments',
-      'wood_fragment',
-      [x, y, z],
-      'driftwood_branch',
-      1,
-      2,
-      2.8,
-      35,
-      grp,
-      parts,
-      savedHarvests
-    );
+    this.registerNode(id, 'Wood Fragments', 'wood_fragment', [x, y, z], 'driftwood_branch', 1, 2, 2.8, 35, grp, parts, savedHarvests);
   }
 
-  private createStoneDepositNode(
-    id: string,
-    x: number,
-    y: number,
-    z: number,
-    savedHarvests: Record<string, number>
-  ): void {
+  private createStoneDepositNode(id: string, x: number, y: number, z: number, savedHarvests: Record<string, number>): void {
     const grp = new THREE.Group();
     grp.position.set(x, y, z);
     const parts: THREE.Object3D[] = [];
 
-    const stoneMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.85 });
+    const pebbleGeo = SharedAssets.getGeometry('flora_stone_pebble', () => new THREE.DodecahedronGeometry(0.22, 0));
+    const stoneMat = SharedAssets.getMaterial('flora_stone_mat', () => new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.85 }));
     for (let s = 0; s < 3; s++) {
-      const pebble = new THREE.Mesh(new THREE.DodecahedronGeometry(0.18 + s * 0.04, 0), stoneMat);
+      const pebble = new THREE.Mesh(pebbleGeo, stoneMat);
+      const scale = 0.82 + s * 0.18;
+      pebble.scale.setScalar(scale);
       pebble.position.set((s - 1) * 0.22, 0.1, (s % 2) * 0.15);
       pebble.rotation.set(s * 0.3, s * 0.5, 0);
       grp.add(pebble);
       parts.push(pebble);
     }
 
-    this.registerNode(
-      id,
-      'Basalt Pebbles',
-      'stone_deposit',
-      [x, y, z],
-      'basalt_pebble',
-      1,
-      3,
-      2.8,
-      35,
-      grp,
-      parts,
-      savedHarvests
-    );
+    this.registerNode(id, 'Basalt Pebbles', 'stone_deposit', [x, y, z], 'basalt_pebble', 1, 3, 2.8, 35, grp, parts, savedHarvests);
   }
 
   private registerNode(
@@ -683,13 +475,14 @@ export class FloraManager {
     group: THREE.Group,
     meshParts: THREE.Object3D[],
     savedHarvests: Record<string, number>,
-    light?: THREE.PointLight,
+    glowSprite?: THREE.Sprite,
     requiresNight = false,
     requiresDimensional = false
   ): void {
-    const lastHarvest = savedHarvests[id] || 0;
+    const storeHarvest = this.worldStateStore?.getFloraHarvestTimestamp(this.regionId, position[0], position[2], id) || 0;
+    const lastHarvest = Math.max(savedHarvests[id] || 0, storeHarvest);
     const now = Date.now();
-    const isHarvested = now - lastHarvest < respawnTimeSeconds * 1000;
+    const isHarvested = lastHarvest > 0 && now - lastHarvest < respawnTimeSeconds * 1000;
 
     const node: FloraNode = {
       id,
@@ -703,25 +496,50 @@ export class FloraManager {
       respawnTimeSeconds,
       group,
       meshParts,
-      light,
+      glowSprite,
       isHarvested,
       harvestTimestamp: lastHarvest,
       regrowthProgress: isHarvested ? 0 : 1,
       requiresNight,
       requiresDimensional,
+      isMounted: false,
     };
 
     if (isHarvested) {
       group.scale.set(0.01, 0.01, 0.01);
-      if (light) light.intensity = 0;
+      if (glowSprite) glowSprite.visible = false;
     }
 
     this.nodes.set(id, node);
-    this.group.add(group);
   }
 
   /**
-   * Find nearest available harvestable node
+   * Stream node visibility/mounting based on chunk ACTIVE state
+   */
+  public syncStreaming(isPositionActive: (x: number, z: number) => boolean): void {
+    const now = Date.now();
+    this.nodes.forEach((node) => {
+      const shouldMount = isPositionActive(node.position[0], node.position[2]);
+      if (shouldMount && !node.isMounted) {
+        // Reconcile regrowth before attaching
+        if (node.isHarvested && now - node.harvestTimestamp >= node.respawnTimeSeconds * 1000) {
+          node.isHarvested = false;
+          node.regrowthProgress = 1.0;
+          node.group.scale.set(1, 1, 1);
+          if (node.glowSprite) node.glowSprite.visible = true;
+          this.worldStateStore?.clearFloraHarvested(this.regionId, node.position[0], node.position[2], node.id);
+        }
+        this.group.add(node.group);
+        node.isMounted = true;
+      } else if (!shouldMount && node.isMounted) {
+        this.group.remove(node.group);
+        node.isMounted = false;
+      }
+    });
+  }
+
+  /**
+   * Find nearest available harvestable node (zero per-frame Vector3 allocations)
    */
   public getNearbyHarvestable(
     playerPos: THREE.Vector3,
@@ -733,8 +551,8 @@ export class FloraManager {
     let minDist = Infinity;
 
     this.nodes.forEach((node) => {
-      const pos = new THREE.Vector3(...node.position);
-      const dist = playerPos.distanceTo(pos);
+      _tmpVec3.set(node.position[0], node.position[1], node.position[2]);
+      const dist = playerPos.distanceTo(_tmpVec3);
 
       if (dist <= node.interactionRadius && dist < minDist) {
         minDist = dist;
@@ -746,7 +564,6 @@ export class FloraManager {
 
     const n = nearest as FloraNode;
 
-    // Check if node is on cooldown
     if (n.isHarvested) {
       const remainingSec = Math.ceil((n.respawnTimeSeconds * 1000 - (Date.now() - n.harvestTimestamp)) / 1000);
       return {
@@ -756,7 +573,6 @@ export class FloraManager {
       };
     }
 
-    // Check night requirement for Moonbloom
     if (n.requiresNight && !isNight && !isRedMoon) {
       return {
         node: n,
@@ -765,7 +581,6 @@ export class FloraManager {
       };
     }
 
-    // Check dimensional disturbance requirement for Rift Orchid
     if (n.requiresDimensional && !isRedMoon && weather !== 'DIMENSIONAL_DISTURBANCE') {
       return {
         node: n,
@@ -781,99 +596,85 @@ export class FloraManager {
     };
   }
 
-  /**
-   * Harvest a flora/resource node
-   */
-  public harvestNode(
-    nodeId: string,
-    inventory: InventorySystem,
-    save: SaveData
-  ): boolean {
+  public harvestNode(nodeId: string, inventory: InventorySystem, save: SaveData): boolean {
     const node = this.nodes.get(nodeId);
     if (!node || node.isHarvested) return false;
 
-    // Award items
-    const rankBonus = (save.explorationRank && save.explorationRank >= 4) ? 1 : 0;
+    const rankBonus = save.explorationRank && save.explorationRank >= 4 ? 1 : 0;
     const qty = Math.floor(Math.random() * (node.maxYield - node.minYield + 1)) + node.minYield + rankBonus;
     inventory.addItem(node.yieldItemId, qty);
 
-    // Audio & Visual State Change
     AudioService.playRelicCollect();
 
     node.isHarvested = true;
     node.harvestTimestamp = Date.now();
     node.regrowthProgress = 0;
 
-    // Save harvest timestamp
     if (!save.harvestedFlora) save.harvestedFlora = {};
     save.harvestedFlora[node.id] = node.harvestTimestamp;
+    this.worldStateStore?.setFloraHarvested(this.regionId, node.position[0], node.position[2], node.id, node.harvestTimestamp);
 
-    // Animate shrinkage
     node.group.scale.set(0.1, 0.1, 0.1);
-    if (node.light) node.light.intensity = 0;
+    if (node.glowSprite) node.glowSprite.visible = false;
 
-    NotificationSystem.notify(
-      'Resource Gathered',
-      `Gathered ${qty}x ${node.name}`,
-      'item',
-      3500
-    );
-
+    NotificationSystem.notify('Resource Gathered', `Gathered ${qty}x ${node.name}`, 'item', 3500);
     return true;
   }
 
-  /**
-   * Per-frame update for plant ambient breathing and regrowth animations
-   */
   public update(dt: number, totalTime: number, isNight: boolean, isRedMoon: boolean): void {
     const now = Date.now();
 
     this.nodes.forEach((node) => {
-      // Regrowth cycle
       if (node.isHarvested) {
         const elapsedMs = now - node.harvestTimestamp;
         const totalMs = node.respawnTimeSeconds * 1000;
 
         if (elapsedMs >= totalMs) {
-          // Node regrown!
           node.isHarvested = false;
           node.regrowthProgress = 1.0;
           node.group.scale.set(1.0, 1.0, 1.0);
-          if (node.light) node.light.intensity = 0.8;
-        } else {
-          // Smooth regrowth scaling in last 5 seconds of cooldown
+          if (node.glowSprite) node.glowSprite.visible = true;
+          this.worldStateStore?.clearFloraHarvested(this.regionId, node.position[0], node.position[2], node.id);
+        } else if (node.isMounted) {
           const remain = totalMs - elapsedMs;
           if (remain < 5000) {
-            const growFrac = 1.0 - remain / 5000;
+            const growFrac = Math.max(0.1, 1.0 - remain / 5000);
             node.group.scale.set(growFrac, growFrac, growFrac);
           }
         }
-      } else {
-        // Ambient subtle breathing
-        const pulse = 1.0 + Math.sin(totalTime * 2.0 + node.position[0]) * 0.04;
-        node.group.scale.set(pulse, pulse, pulse);
+        return;
+      }
 
-        // Nighttime moonbloom petal unfurl
-        if (node.requiresNight) {
-          const isOpen = isNight || isRedMoon;
-          const targetY = isOpen ? 1.0 : 0.25;
-          node.group.scale.y = THREE.MathUtils.lerp(node.group.scale.y, targetY, dt * 2.0);
-          if (node.light) {
-            node.light.intensity = isOpen ? 0.9 : 0.0;
-          }
+      if (!node.isMounted) return;
+
+      const pulse = 1.0 + Math.sin(totalTime * 2.0 + node.position[0]) * 0.04;
+      node.group.scale.set(pulse, pulse, pulse);
+
+      if (node.requiresNight) {
+        const isOpen = isNight || isRedMoon;
+        const targetY = isOpen ? 1.0 : 0.25;
+        node.group.scale.y = THREE.MathUtils.lerp(node.group.scale.y, targetY, dt * 2.0);
+        if (node.glowSprite) {
+          node.glowSprite.visible = isOpen;
         }
       }
     });
   }
 
   public clear(): void {
-    while (this.group.children.length > 0) {
-      this.group.remove(this.group.children[0]);
-    }
+    this.nodes.forEach((node) => {
+      if (node.isMounted) {
+        this.group.remove(node.group);
+      }
+      SharedAssets.disposeObject3DSafe(node.group);
+    });
     this.nodes.clear();
   }
 
   public dispose(): void {
     this.clear();
+    if (this.group.parent) {
+      this.group.parent.remove(this.group);
+    }
   }
 }

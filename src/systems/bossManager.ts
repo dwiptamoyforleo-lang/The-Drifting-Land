@@ -1,18 +1,10 @@
 /**
  * Boss Encounter Manager for The Drifting Land.
- * Orchestrates 6 distinct world boss encounters:
- * 1. Rootbound Guardian (Overgrown Grove Altar [-36, y, 28])
- * 2. Ash Colossus (Cinder Spire Crater [-25, y, -50])
- * 3. Storm Sentinel (Windward Promontory [46, y, 24])
- * 4. Archive Keeper (Sunken Undercroft Vault [-48, y, -10])
- * 5. Rift Sovereign (Dimensional Gateway Nexus [-56, y, -20])
- * 6. Crimson Warden (Shattered Rift Crater [-52, y, -45])
- *
- * Implements:
- * - Readable attack windup telegraphs with expanding ground rings
- * - 2 distinct phases (<50% enrage state with empowered attacks)
- * - Anti-exploit: single-grant unique relics, leash resets, i-frames
- * - Seamless integration with HUD, inventory, quests, achievements, and persistence
+ * Orchestrates 6 distinct world boss encounters with:
+ * - Shared geometries & materials via SharedAssets
+ * - Throttled / diffed UI state notifications (never 60 Hz React re-renders)
+ * - Chunk streaming visibility & region scoping
+ * - Zero Date.now() animation calls and clean GPU disposal
  */
 
 import * as THREE from 'three';
@@ -24,6 +16,7 @@ import { NotificationSystem } from './notificationSystem';
 import { AudioService } from '../services/audio';
 import { rollLoot } from '../data/lootTables';
 import { getItemDef } from '../data/items';
+import { SharedAssets } from '../engine/sharedAssets';
 
 export interface BossEntityData {
   id: BossId;
@@ -62,7 +55,9 @@ export interface BossInstance {
   telegraphMat: THREE.MeshBasicMaterial;
   damageCooldown: number;
   hitFlashTimer: number;
-  materials: THREE.Material[];
+  isFlashing: boolean;
+  meshes: THREE.Mesh[];
+  streamVisible: boolean;
   customAnim?: (dt: number, time: number) => void;
 }
 
@@ -73,6 +68,7 @@ export class BossManager {
   private quests: QuestSystem;
   private achievements: AchievementSystem;
   private isSoftwareGl: boolean;
+  private animTime: number = 0;
 
   private bosses: Map<BossId, BossInstance> = new Map();
   public activeBossId: BossId | null = null;
@@ -81,6 +77,13 @@ export class BossManager {
 
   private onBossStateChangeCallback?: (state: ActiveBossState | null) => void;
   private onPlayerDamageCallback?: (damage: number) => void;
+  private flashMaterial: THREE.MeshBasicMaterial;
+
+  // UI throttling state so boss HUD never triggers 60 Hz React re-renders
+  private uiNotifyTimer: number = 0;
+  private lastUiHealth: number = -1;
+  private lastUiPhase: number = -1;
+  private lastUiWarningType: string | null = null;
 
   constructor(
     scene: THREE.Scene,
@@ -92,7 +95,8 @@ export class BossManager {
     initialClaimed: string[] = [],
     isSoftwareGl = false,
     onBossStateChange?: (state: ActiveBossState | null) => void,
-    onPlayerDamage?: (damage: number) => void
+    onPlayerDamage?: (damage: number) => void,
+    regionId = 'verdant_reach'
   ) {
     this.scene = scene;
     this.getTerrainHeight = getTerrainHeight;
@@ -104,12 +108,28 @@ export class BossManager {
     this.isSoftwareGl = isSoftwareGl;
     this.onBossStateChangeCallback = onBossStateChange;
     this.onPlayerDamageCallback = onPlayerDamage;
+    this.flashMaterial = SharedAssets.getMaterial('combat_hit_flash', () =>
+      new THREE.MeshBasicMaterial({ color: 0xffffff })
+    );
 
+    this.populateForRegion(regionId, getTerrainHeight);
+  }
+
+  public populateForRegion(
+    regionId: string,
+    getTerrainHeight?: (x: number, z: number) => number
+  ): void {
+    this.clear();
+    if (getTerrainHeight) {
+      this.getTerrainHeight = getTerrainHeight;
+    }
+    if (regionId !== 'verdant_reach') {
+      return;
+    }
     this.initializeAllBosses();
   }
 
   private initializeAllBosses(): void {
-    // 1. Rootbound Guardian (Overgrown Grove Altar)
     this.createBoss({
       id: 'rootbound_guardian',
       name: 'Rootbound Guardian',
@@ -125,7 +145,6 @@ export class BossManager {
       achievementId: 'ach_grove_conquered',
     });
 
-    // 2. Ash Colossus (Cinder Spire Crater)
     this.createBoss({
       id: 'ash_colossus',
       name: 'Ash Colossus',
@@ -141,7 +160,6 @@ export class BossManager {
       achievementId: 'ach_colossus_conquered',
     });
 
-    // 3. Storm Sentinel (Windward Promontory)
     this.createBoss({
       id: 'storm_sentinel',
       name: 'Storm Sentinel',
@@ -157,7 +175,6 @@ export class BossManager {
       achievementId: 'ach_storm_conquered',
     });
 
-    // 4. Archive Keeper (Sunken Undercroft Vault)
     this.createBoss({
       id: 'archive_keeper',
       name: 'Archive Keeper',
@@ -173,7 +190,6 @@ export class BossManager {
       achievementId: 'ach_archive_conquered',
     });
 
-    // 5. Rift Sovereign (Dimensional Gateway Nexus)
     this.createBoss({
       id: 'rift_sovereign',
       name: 'Rift Sovereign',
@@ -189,7 +205,6 @@ export class BossManager {
       achievementId: 'ach_sovereign_conquered',
     });
 
-    // 6. Crimson Warden (Shattered Rift Crater)
     this.createBoss({
       id: 'crimson_warden',
       name: 'Crimson Warden',
@@ -206,133 +221,150 @@ export class BossManager {
     });
   }
 
+  private addBossMesh(
+    parent: THREE.Group,
+    meshes: THREE.Mesh[],
+    geo: THREE.BufferGeometry,
+    mat: THREE.Material
+  ): THREE.Mesh {
+    const mesh = new THREE.Mesh(geo, mat);
+    (mesh as any).__origMat = mat;
+    parent.add(mesh);
+    meshes.push(mesh);
+    return mesh;
+  }
+
   private createBoss(data: BossEntityData): void {
     const group = new THREE.Group();
     group.name = `boss_${data.id}`;
     group.position.copy(data.arenaCenter);
     this.scene.add(group);
 
-    const materials: THREE.Material[] = [];
+    const meshes: THREE.Mesh[] = [];
     const meshGroup = new THREE.Group();
     group.add(meshGroup);
 
-    // Arena Perimeter Runes / Torches
-    const arenaMat = new THREE.MeshStandardMaterial({
-      color: 0x27272a,
-      roughness: 0.9,
-      metalness: 0.2,
-    });
+    // Shared Arena Perimeter Obelisks & Runes
+    const arenaMat = SharedAssets.getMaterial('boss_arena_obelisk', () =>
+      new THREE.MeshStandardMaterial({ color: 0x27272a, roughness: 0.9, metalness: 0.2 })
+    );
+    const obeliskGeo = SharedAssets.getGeometry('boss_obelisk_geo', () => new THREE.BoxGeometry(0.8, 3.5, 0.8));
+    const runeGeo = SharedAssets.getGeometry('boss_rune_geo', () => new THREE.BoxGeometry(0.15, 2.0, 0.15));
+    const runeColor =
+      data.id === 'rootbound_guardian' ? 0x22c55e
+        : data.id === 'ash_colossus' ? 0xf97316
+        : data.id === 'storm_sentinel' ? 0x06b6d4
+        : data.id === 'archive_keeper' ? 0xa855f7
+        : data.id === 'rift_sovereign' ? 0xec4899
+        : 0xef4444;
+    const runeMat = SharedAssets.getMaterial(`boss_rune_${data.id}`, () =>
+      new THREE.MeshBasicMaterial({ color: runeColor })
+    );
+
     for (let i = 0; i < 4; i++) {
       const angle = (i * Math.PI) / 2;
       const px = Math.cos(angle) * (data.triggerRadius - 2);
       const pz = Math.sin(angle) * (data.triggerRadius - 2);
-      const obelisk = new THREE.Mesh(new THREE.BoxGeometry(0.8, 3.5, 0.8), arenaMat);
+      const obelisk = new THREE.Mesh(obeliskGeo, arenaMat);
       obelisk.position.set(px, 1.75, pz);
       group.add(obelisk);
 
-      const runeMat = new THREE.MeshBasicMaterial({
-        color: data.id === 'rootbound_guardian' ? 0x22c55e
-          : data.id === 'ash_colossus' ? 0xf97316
-          : data.id === 'storm_sentinel' ? 0x06b6d4
-          : data.id === 'archive_keeper' ? 0xa855f7
-          : data.id === 'rift_sovereign' ? 0xec4899
-          : 0xef4444,
-      });
-      const rune = new THREE.Mesh(new THREE.BoxGeometry(0.15, 2.0, 0.15), runeMat);
+      const rune = new THREE.Mesh(runeGeo, runeMat);
       rune.position.set(px * 0.95, 1.75, pz * 0.95);
       group.add(rune);
     }
 
-    // Boss 3D Procedural Meshes
     let customAnim: ((dt: number, time: number) => void) | undefined;
 
     if (data.id === 'rootbound_guardian') {
-      // Ancient living bark golem
-      const barkMat = new THREE.MeshStandardMaterial({ color: 0x3f2d20, roughness: 0.9 });
-      materials.push(barkMat);
+      const barkMat = SharedAssets.getMaterial('boss_rg_bark', () =>
+        new THREE.MeshStandardMaterial({ color: 0x3f2d20, roughness: 0.9 })
+      );
+      const coreMat = SharedAssets.getMaterial('boss_rg_core', () =>
+        new THREE.MeshStandardMaterial({ color: 0x15803d, emissive: 0x22c55e, emissiveIntensity: 1.2 })
+      );
 
-      const torso = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.8, 3.2, 8), barkMat);
+      const torso = this.addBossMesh(
+        meshGroup,
+        meshes,
+        SharedAssets.getGeometry('boss_rg_torso', () => new THREE.CylinderGeometry(1.2, 1.8, 3.2, 8)),
+        barkMat
+      );
       torso.position.set(0, 2.5, 0);
-      meshGroup.add(torso);
 
-      // Primordial glowing heart core
-      const coreMat = new THREE.MeshStandardMaterial({
-        color: 0x15803d,
-        emissive: 0x22c55e,
-        emissiveIntensity: 1.2,
-      });
-      materials.push(coreMat);
-      const core = new THREE.Mesh(new THREE.IcosahedronGeometry(0.7, 1), coreMat);
+      const core = this.addBossMesh(
+        meshGroup,
+        meshes,
+        SharedAssets.getGeometry('boss_rg_core_geo', () => new THREE.IcosahedronGeometry(0.7, 1)),
+        coreMat
+      );
       core.position.set(0, 2.6, 0.7);
-      meshGroup.add(core);
 
-      // Huge root clubs
-      const clubL = new THREE.Mesh(new THREE.BoxGeometry(0.7, 2.5, 0.7), barkMat);
+      const clubGeo = SharedAssets.getGeometry('boss_rg_club', () => new THREE.BoxGeometry(0.7, 2.5, 0.7));
+      const clubL = this.addBossMesh(meshGroup, meshes, clubGeo, barkMat);
       clubL.position.set(-2.2, 2.0, 0);
-      const clubR = new THREE.Mesh(new THREE.BoxGeometry(0.7, 2.5, 0.7), barkMat);
+      const clubR = this.addBossMesh(meshGroup, meshes, clubGeo, barkMat);
       clubR.position.set(2.2, 2.0, 0);
-      meshGroup.add(clubL, clubR);
 
       customAnim = (_dt, time) => {
         meshGroup.position.y = Math.sin(time * 1.5) * 0.15;
         clubL.rotation.x = Math.sin(time * 2.0) * 0.3;
         clubR.rotation.x = -Math.sin(time * 2.0) * 0.3;
       };
-
     } else if (data.id === 'ash_colossus') {
-      // Obsidian & molten magma titan
-      const obsMat = new THREE.MeshStandardMaterial({ color: 0x18181b, roughness: 0.8 });
-      const lavaMat = new THREE.MeshStandardMaterial({
-        color: 0xea580c,
-        emissive: 0xf97316,
-        emissiveIntensity: 1.4,
-      });
-      materials.push(obsMat, lavaMat);
+      const obsMat = SharedAssets.getMaterial('boss_ac_obs', () =>
+        new THREE.MeshStandardMaterial({ color: 0x18181b, roughness: 0.8 })
+      );
+      const lavaMat = SharedAssets.getMaterial('boss_ac_lava', () =>
+        new THREE.MeshStandardMaterial({ color: 0xea580c, emissive: 0xf97316, emissiveIntensity: 1.4 })
+      );
 
-      const torso = new THREE.Mesh(new THREE.BoxGeometry(2.4, 3.2, 1.8), obsMat);
+      const torso = this.addBossMesh(
+        meshGroup,
+        meshes,
+        SharedAssets.getGeometry('boss_ac_torso', () => new THREE.BoxGeometry(2.4, 3.2, 1.8)),
+        obsMat
+      );
       torso.position.set(0, 2.8, 0);
-      meshGroup.add(torso);
 
-      const lavaHeart = new THREE.Mesh(new THREE.OctahedronGeometry(0.9, 0), lavaMat);
+      const lavaHeart = this.addBossMesh(
+        meshGroup,
+        meshes,
+        SharedAssets.getGeometry('boss_ac_heart', () => new THREE.OctahedronGeometry(0.9, 0)),
+        lavaMat
+      );
       lavaHeart.position.set(0, 3.0, 0.8);
-      meshGroup.add(lavaHeart);
 
-      // Basalt shoulders
-      const pauldronL = new THREE.Mesh(new THREE.DodecahedronGeometry(1.0, 0), obsMat);
+      const pauldronGeo = SharedAssets.getGeometry('boss_ac_pauldron', () => new THREE.DodecahedronGeometry(1.0, 0));
+      const pauldronL = this.addBossMesh(meshGroup, meshes, pauldronGeo, obsMat);
       pauldronL.position.set(-2.0, 4.0, 0);
-      const pauldronR = new THREE.Mesh(new THREE.DodecahedronGeometry(1.0, 0), obsMat);
+      const pauldronR = this.addBossMesh(meshGroup, meshes, pauldronGeo, obsMat);
       pauldronR.position.set(2.0, 4.0, 0);
-      meshGroup.add(pauldronL, pauldronR);
 
       customAnim = (_dt, time) => {
         lavaHeart.rotation.y = time * 2;
         lavaHeart.rotation.z = time * 1.5;
       };
-
     } else if (data.id === 'storm_sentinel') {
-      // Floating lightning spire
-      const spireMat = new THREE.MeshStandardMaterial({
-        color: 0x082f49,
-        roughness: 0.2,
-        metalness: 0.9,
-      });
-      const elecMat = new THREE.MeshStandardMaterial({
-        color: 0x38bdf8,
-        emissive: 0x0284c7,
-        emissiveIntensity: 1.5,
-      });
-      materials.push(spireMat, elecMat);
+      const spireMat = SharedAssets.getMaterial('boss_ss_spire', () =>
+        new THREE.MeshStandardMaterial({ color: 0x082f49, roughness: 0.2, metalness: 0.9 })
+      );
+      const elecMat = SharedAssets.getMaterial('boss_ss_elec', () =>
+        new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x0284c7, emissiveIntensity: 1.5 })
+      );
 
-      const mainSpire = new THREE.Mesh(new THREE.ConeGeometry(0.9, 4.2, 6), spireMat);
+      const mainSpire = this.addBossMesh(
+        meshGroup,
+        meshes,
+        SharedAssets.getGeometry('boss_ss_main', () => new THREE.ConeGeometry(0.9, 4.2, 6)),
+        spireMat
+      );
       mainSpire.position.set(0, 3.2, 0);
-      meshGroup.add(mainSpire);
 
-      // 4 orbiting resonance prisms
+      const prismGeo = SharedAssets.getGeometry('boss_ss_prism', () => new THREE.OctahedronGeometry(0.4, 0));
       const prisms: THREE.Mesh[] = [];
       for (let i = 0; i < 4; i++) {
-        const prism = new THREE.Mesh(new THREE.OctahedronGeometry(0.4, 0), elecMat);
-        meshGroup.add(prism);
-        prisms.push(prism);
+        prisms.push(this.addBossMesh(meshGroup, meshes, prismGeo, elecMat));
       }
 
       customAnim = (_dt, time) => {
@@ -344,63 +376,66 @@ export class BossManager {
           p.rotation.x = time * 3;
         });
       };
-
     } else if (data.id === 'archive_keeper') {
-      // Ancient celestial runic keeper
-      const keeperMat = new THREE.MeshStandardMaterial({
-        color: 0xd97706,
-        roughness: 0.3,
-        metalness: 0.8,
-      });
-      const lensMat = new THREE.MeshStandardMaterial({
-        color: 0x7e22ce,
-        emissive: 0xa855f7,
-        emissiveIntensity: 1.3,
-      });
-      materials.push(keeperMat, lensMat);
+      const keeperMat = SharedAssets.getMaterial('boss_ak_body', () =>
+        new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.3, metalness: 0.8 })
+      );
+      const lensMat = SharedAssets.getMaterial('boss_ak_lens', () =>
+        new THREE.MeshStandardMaterial({ color: 0x7e22ce, emissive: 0xa855f7, emissiveIntensity: 1.3 })
+      );
 
-      const sphere = new THREE.Mesh(new THREE.SphereGeometry(1.3, 16, 12), keeperMat);
+      const sphere = this.addBossMesh(
+        meshGroup,
+        meshes,
+        SharedAssets.getGeometry('boss_ak_sphere', () => new THREE.SphereGeometry(1.3, 14, 10)),
+        keeperMat
+      );
       sphere.position.set(0, 3.0, 0);
-      meshGroup.add(sphere);
 
-      const eye = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.4, 12), lensMat);
+      const eye = this.addBossMesh(
+        meshGroup,
+        meshes,
+        SharedAssets.getGeometry('boss_ak_eye', () => new THREE.CylinderGeometry(0.5, 0.5, 0.4, 12)),
+        lensMat
+      );
       eye.rotation.x = Math.PI / 2;
       eye.position.set(0, 3.0, 1.2);
-      meshGroup.add(eye);
 
-      // Orbiting armillary ring
-      const ring = new THREE.Mesh(
-        new THREE.TorusGeometry(2.4, 0.1, 8, 24),
+      const ring = this.addBossMesh(
+        meshGroup,
+        meshes,
+        SharedAssets.getGeometry('boss_ak_ring', () => new THREE.TorusGeometry(2.4, 0.1, 8, 24)),
         keeperMat
       );
       ring.position.set(0, 3.0, 0);
-      meshGroup.add(ring);
 
       customAnim = (_dt, time) => {
         meshGroup.position.y = Math.sin(time * 1.8) * 0.25;
         ring.rotation.x = time * 1.2;
         ring.rotation.y = time * 1.8;
       };
-
     } else if (data.id === 'rift_sovereign') {
-      // Cosmic void entity
-      const voidMat = new THREE.MeshStandardMaterial({
-        color: 0x3b0764,
-        emissive: 0x581c87,
-        emissiveIntensity: 0.9,
-      });
-      const starMat = new THREE.MeshBasicMaterial({ color: 0xf472b6 });
-      materials.push(voidMat, starMat);
+      const voidMat = SharedAssets.getMaterial('boss_rs_void', () =>
+        new THREE.MeshStandardMaterial({ color: 0x3b0764, emissive: 0x581c87, emissiveIntensity: 0.9 })
+      );
+      const starMat = SharedAssets.getMaterial('boss_rs_star', () => new THREE.MeshBasicMaterial({ color: 0xf472b6 }));
 
-      const core = new THREE.Mesh(new THREE.DodecahedronGeometry(1.4, 0), voidMat);
+      const core = this.addBossMesh(
+        meshGroup,
+        meshes,
+        SharedAssets.getGeometry('boss_rs_core', () => new THREE.DodecahedronGeometry(1.4, 0)),
+        voidMat
+      );
       core.position.set(0, 3.5, 0);
-      meshGroup.add(core);
 
-      // Void halo
-      const halo = new THREE.Mesh(new THREE.TorusGeometry(3.0, 0.15, 6, 24), starMat);
+      const halo = this.addBossMesh(
+        meshGroup,
+        meshes,
+        SharedAssets.getGeometry('boss_rs_halo', () => new THREE.TorusGeometry(3.0, 0.15, 6, 24)),
+        starMat
+      );
       halo.rotation.x = Math.PI / 3;
       halo.position.set(0, 3.5, 0);
-      meshGroup.add(halo);
 
       customAnim = (_dt, time) => {
         meshGroup.position.y = Math.sin(time * 2.2) * 0.35;
@@ -408,28 +443,37 @@ export class BossManager {
         core.rotation.x = time * 0.5;
         halo.rotation.z = time * 1.2;
       };
-
     } else if (data.id === 'crimson_warden') {
-      // Obsidian warrior with crimson blade
-      const redMat = new THREE.MeshStandardMaterial({
-        color: 0x991b1b,
-        emissive: 0xef4444,
-        emissiveIntensity: 1.0,
-      });
-      const obsMat = new THREE.MeshStandardMaterial({ color: 0x09090b, roughness: 0.8 });
-      materials.push(redMat, obsMat);
+      const redMat = SharedAssets.getMaterial('boss_cw_red', () =>
+        new THREE.MeshStandardMaterial({ color: 0x991b1b, emissive: 0xef4444, emissiveIntensity: 1.0 })
+      );
+      const obsMat = SharedAssets.getMaterial('boss_cw_obs', () =>
+        new THREE.MeshStandardMaterial({ color: 0x09090b, roughness: 0.8 })
+      );
 
-      const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.4, 3.2, 8), obsMat);
+      const torso = this.addBossMesh(
+        meshGroup,
+        meshes,
+        SharedAssets.getGeometry('boss_cw_torso', () => new THREE.CylinderGeometry(0.9, 1.4, 3.2, 8)),
+        obsMat
+      );
       torso.position.set(0, 2.8, 0);
-      meshGroup.add(torso);
 
-      const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.7, 0), redMat);
+      const core = this.addBossMesh(
+        meshGroup,
+        meshes,
+        SharedAssets.getGeometry('boss_cw_core', () => new THREE.OctahedronGeometry(0.7, 0)),
+        redMat
+      );
       core.position.set(0, 3.0, 0.6);
-      meshGroup.add(core);
 
-      const blade = new THREE.Mesh(new THREE.BoxGeometry(0.3, 3.5, 0.1), redMat);
+      const blade = this.addBossMesh(
+        meshGroup,
+        meshes,
+        SharedAssets.getGeometry('boss_cw_blade', () => new THREE.BoxGeometry(0.3, 3.5, 0.1)),
+        redMat
+      );
       blade.position.set(1.8, 3.2, 0.5);
-      meshGroup.add(blade);
 
       customAnim = (_dt, time) => {
         meshGroup.position.y = Math.sin(time * 2.0) * 0.15;
@@ -437,17 +481,21 @@ export class BossManager {
       };
     }
 
-    // Ground Attack Telegraph Ring
     const telegraphMat = new THREE.MeshBasicMaterial({
       color: 0xef4444,
       transparent: true,
       opacity: 0,
       side: THREE.DoubleSide,
+      depthWrite: false,
     });
-    const ringGeo = new THREE.RingGeometry(0.1, 5.0, 32);
-    ringGeo.rotateX(-Math.PI / 2);
+    const ringGeo = SharedAssets.getGeometry('boss_telegraph_ring', () => {
+      const g = new THREE.RingGeometry(0.1, 5.0, 28);
+      g.rotateX(-Math.PI / 2);
+      return g;
+    });
     const telegraphMesh = new THREE.Mesh(ringGeo, telegraphMat);
     telegraphMesh.position.set(0, 0.1, 0);
+    telegraphMesh.visible = false;
     group.add(telegraphMesh);
 
     const isDefeated = this.defeatedBosses.has(data.id);
@@ -471,54 +519,99 @@ export class BossManager {
       telegraphMat,
       damageCooldown: 0,
       hitFlashTimer: 0,
-      materials,
+      isFlashing: false,
+      meshes,
+      streamVisible: true,
       customAnim,
     });
   }
 
-  /**
-   * Main boss update cycle
-   */
+  public syncStreaming(isVisible: (x: number, z: number) => boolean): void {
+    for (const boss of this.bosses.values()) {
+      const vis = boss.isActive || isVisible(boss.data.arenaCenter.x, boss.data.arenaCenter.z);
+      boss.streamVisible = vis;
+      boss.group.visible = vis;
+    }
+  }
+
+  private emitBossUi(boss: BossInstance, force = false): void {
+    const warnType = boss.currentTelegraph ? boss.currentTelegraph.type : null;
+    const stateChanged =
+      force ||
+      boss.health !== this.lastUiHealth ||
+      boss.phase !== this.lastUiPhase ||
+      warnType !== this.lastUiWarningType;
+
+    if (!stateChanged && this.uiNotifyTimer < 0.12) {
+      return;
+    }
+
+    this.uiNotifyTimer = 0;
+    this.lastUiHealth = boss.health;
+    this.lastUiPhase = boss.phase;
+    this.lastUiWarningType = warnType;
+
+    this.onBossStateChangeCallback?.({
+      id: boss.data.id,
+      name: boss.data.name,
+      subtitle: boss.data.subtitle,
+      active: true,
+      health: boss.health,
+      maxHealth: boss.maxHealth,
+      phase: boss.phase,
+      attackWarning: boss.currentTelegraph
+        ? {
+            type: boss.currentTelegraph.type,
+            progress: boss.currentTelegraph.timer / boss.currentTelegraph.duration,
+            x: boss.data.arenaCenter.x,
+            z: boss.data.arenaCenter.z,
+            radius: boss.currentTelegraph.radius,
+          }
+        : null,
+      isDefeated: false,
+    });
+  }
+
   public update(
     dt: number,
     playerPos: THREE.Vector3,
     isRedMoon = false
   ): void {
-    const time = Date.now() * 0.001;
+    this.animTime += dt;
+    this.uiNotifyTimer += dt;
 
     let currentlyActiveBoss: BossInstance | null = null;
 
     for (const boss of this.bosses.values()) {
-      // Defeated bosses stay inactive unless reset
       if (boss.isDefeated) continue;
+      if (!boss.streamVisible && !boss.isActive) continue;
 
-      const distToPlayer = playerPos.distanceTo(boss.data.arenaCenter);
+      const distSqToPlayer = playerPos.distanceToSquared(boss.data.arenaCenter);
+      if (distSqToPlayer > 75 * 75 && !boss.isActive) continue;
 
-      // Custom idle/combat procedural animation
+      const distToPlayer = Math.sqrt(distSqToPlayer);
+
       if (boss.customAnim) {
-        boss.customAnim(dt, time);
+        boss.customAnim(dt, this.animTime);
       }
 
-      // Hit flash restore
       if (boss.hitFlashTimer > 0) {
         boss.hitFlashTimer -= dt;
-        if (boss.hitFlashTimer <= 0) {
-          boss.materials.forEach((m) => {
-            if ('color' in m && (m as any).__origColor) {
-              (m as any).color.setHex((m as any).__origColor);
+        if (boss.hitFlashTimer <= 0 && boss.isFlashing) {
+          boss.isFlashing = false;
+          for (const m of boss.meshes) {
+            if ((m as any).__origMat) {
+              m.material = (m as any).__origMat;
             }
-          });
+          }
         }
       }
 
-      // Cooldown timer
       if (boss.damageCooldown > 0) {
         boss.damageCooldown -= dt;
       }
 
-      // Leash & Engagement logic
       if (!boss.isActive) {
-        // Crimson Warden only awakens during Red Moon or if engaged directly
         if (boss.data.id === 'crimson_warden' && !isRedMoon && distToPlayer > 8) {
           continue;
         }
@@ -528,6 +621,7 @@ export class BossManager {
           boss.health = boss.maxHealth;
           boss.phase = 1;
           boss.attackTimer = 1.5;
+          currentlyActiveBoss = boss;
           AudioService.playBossPhaseChange();
           NotificationSystem.notify(
             `Encounter: ${boss.data.name}`,
@@ -535,18 +629,19 @@ export class BossManager {
             'danger',
             5000
           );
+          this.emitBossUi(boss, true);
         }
       } else {
-        // Boss is actively fighting!
         currentlyActiveBoss = boss;
 
-        // Leash Reset Check
         if (distToPlayer > boss.data.leashRadius) {
           boss.isActive = false;
           boss.health = boss.maxHealth;
           boss.phase = 1;
           boss.currentTelegraph = null;
           boss.telegraphMat.opacity = 0;
+          boss.telegraphMesh.visible = false;
+          currentlyActiveBoss = null;
           NotificationSystem.notify(
             `${boss.data.name} Leashed`,
             'You fled the arena — encounter reset.',
@@ -556,12 +651,10 @@ export class BossManager {
           continue;
         }
 
-        // Face player
         const dx = playerPos.x - boss.data.arenaCenter.x;
         const dz = playerPos.z - boss.data.arenaCenter.z;
         boss.meshGroup.rotation.y = Math.atan2(dx, dz);
 
-        // Check Phase 2 Enrage (< 50% HP)
         if (boss.phase === 1 && boss.health <= boss.maxHealth * 0.5) {
           boss.phase = 2;
           boss.attackInterval = boss.data.phase2Interval;
@@ -574,11 +667,9 @@ export class BossManager {
           );
         }
 
-        // --- Attack Telegraph & Execution Cycle ---
         if (!boss.currentTelegraph) {
           boss.attackTimer -= dt;
           if (boss.attackTimer <= 0) {
-            // Initiate heavy telegraphed attack
             const radius = boss.phase === 2 ? 6.2 : 4.8;
             const duration = boss.phase === 2 ? 1.0 : 1.4;
             const dmg = Math.round(boss.data.baseDamage * (boss.phase === 2 ? 1.4 : 1.0));
@@ -592,20 +683,17 @@ export class BossManager {
             };
           }
         } else {
-          // Progress telegraph ring
           const t = boss.currentTelegraph;
           t.timer += dt;
           const progress = Math.min(1.0, t.timer / t.duration);
 
-          // Update telegraph ring visual
+          boss.telegraphMesh.visible = true;
           boss.telegraphMat.opacity = 0.25 + progress * 0.6;
           const scale = Math.max(0.1, progress * (t.radius / 5.0));
           boss.telegraphMesh.scale.set(scale, 1, scale);
 
-          // Telegraph detonates!
           if (t.timer >= t.duration) {
             AudioService.playDamage();
-            // Check player distance to arena center / impact
             if (distToPlayer <= t.radius) {
               this.onPlayerDamageCallback?.(t.damage);
               NotificationSystem.notify(
@@ -618,56 +706,34 @@ export class BossManager {
 
             boss.currentTelegraph = null;
             boss.telegraphMat.opacity = 0;
+            boss.telegraphMesh.visible = false;
             boss.attackTimer = boss.attackInterval;
           }
         }
       }
     }
 
-    // Notify UI / HUD of active boss
     if (currentlyActiveBoss) {
       this.activeBossId = currentlyActiveBoss.data.id;
-      const b = currentlyActiveBoss;
-      this.onBossStateChangeCallback?.({
-        id: b.data.id,
-        name: b.data.name,
-        subtitle: b.data.subtitle,
-        active: true,
-        health: b.health,
-        maxHealth: b.maxHealth,
-        phase: b.phase,
-        attackWarning: b.currentTelegraph
-          ? {
-              type: b.currentTelegraph.type,
-              progress: b.currentTelegraph.timer / b.currentTelegraph.duration,
-              x: b.data.arenaCenter.x,
-              z: b.data.arenaCenter.z,
-              radius: b.currentTelegraph.radius,
-            }
-          : null,
-        isDefeated: false,
-      });
-    } else {
-      if (this.activeBossId) {
-        this.activeBossId = null;
-        this.onBossStateChangeCallback?.(null);
-      }
+      this.emitBossUi(currentlyActiveBoss, false);
+    } else if (this.activeBossId) {
+      this.activeBossId = null;
+      this.lastUiHealth = -1;
+      this.lastUiPhase = -1;
+      this.lastUiWarningType = null;
+      this.onBossStateChangeCallback?.(null);
     }
   }
 
-  /**
-   * Handle Player Attack on Nearby Boss
-   */
   public handlePlayerAttack(
     playerPos: THREE.Vector3,
     damage: number
   ): { hit: boolean; bossDefeated: boolean; bossName?: string } {
-    for (const [id, boss] of this.bosses.entries()) {
+    for (const boss of this.bosses.values()) {
       if (!boss.isActive || boss.isDefeated) continue;
 
       const dist = playerPos.distanceTo(boss.data.arenaCenter);
       if (dist <= 6.5) {
-        // Prevent simultaneous damage spam (0.2s boss i-frames)
         if (boss.damageCooldown > 0) {
           return { hit: false, bossDefeated: false };
         }
@@ -676,25 +742,20 @@ export class BossManager {
         const dealt = Math.round(damage * (0.85 + Math.random() * 0.3));
         boss.health = Math.max(0, boss.health - dealt);
 
-        // Visual Hit Flash
         boss.hitFlashTimer = 0.14;
-        boss.materials.forEach((m) => {
-          if ('color' in m) {
-            if (!(m as any).__origColor) {
-              (m as any).__origColor = (m as any).color.getHex();
-            }
-            (m as any).color.setHex(0xffffff);
-          }
-        });
+        boss.isFlashing = true;
+        for (const m of boss.meshes) {
+          m.material = this.flashMaterial;
+        }
 
         AudioService.playHit();
 
-        // Check Boss Defeat
         if (boss.health <= 0) {
           this.handleBossDefeat(boss);
           return { hit: true, bossDefeated: true, bossName: boss.data.name };
         }
 
+        this.emitBossUi(boss, true);
         return { hit: true, bossDefeated: false, bossName: boss.data.name };
       }
     }
@@ -707,19 +768,16 @@ export class BossManager {
     boss.isActive = false;
     boss.meshGroup.visible = false;
     boss.telegraphMat.opacity = 0;
+    boss.telegraphMesh.visible = false;
 
     this.defeatedBosses.add(boss.data.id);
     const isFirstKill = !this.claimedBossRewards.has(boss.data.id);
     this.claimedBossRewards.add(boss.data.id);
 
-    // Roll data-driven loot table with anti-exploit single-grant check
     const loot = rollLoot(boss.data.id, isFirstKill, true);
-
-    // Grant Coins and XP
     this.inventory.addCoins(loot.coins);
     this.quests.addExplorationXp(loot.xp);
 
-    // Grant items to inventory
     const grantedNames: string[] = [];
     for (const item of loot.items) {
       const def = getItemDef(item.itemId);
@@ -730,13 +788,11 @@ export class BossManager {
       }
     }
 
-    // Quest & Achievement updates
     this.quests.reportProgress('DEFEAT_BOSS', boss.data.id, 1);
     this.quests.reportProgress('DEFEAT_BOSS', boss.data.questObjectiveId, 1);
     this.achievements.unlock(boss.data.achievementId);
     this.achievements.unlock('ach_combat_victor');
 
-    // Triumphant audio & fanfare
     AudioService.playDiscoveryFanfare();
 
     NotificationSystem.notify(
@@ -746,6 +802,8 @@ export class BossManager {
       8000
     );
 
+    this.activeBossId = null;
+    this.lastUiHealth = -1;
     this.onBossStateChangeCallback?.(null);
   }
 
@@ -765,11 +823,19 @@ export class BossManager {
     return { near: false };
   }
 
-  public dispose(): void {
+  public clear(): void {
     for (const boss of this.bosses.values()) {
       this.scene.remove(boss.group);
-      boss.materials.forEach((m) => m.dispose());
+      SharedAssets.disposeObject3DSafe(boss.group);
     }
     this.bosses.clear();
+    if (this.activeBossId) {
+      this.activeBossId = null;
+      this.onBossStateChangeCallback?.(null);
+    }
+  }
+
+  public dispose(): void {
+    this.clear();
   }
 }

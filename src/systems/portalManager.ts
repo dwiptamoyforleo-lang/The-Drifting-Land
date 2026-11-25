@@ -1,17 +1,19 @@
 /**
  * Portal 3D Architecture & Proximity Management for The Drifting Land.
- * Implements physical gateways in The Verdant Reach and return conduits in destination realms.
+ * - Shares stone, spire, dais, and ring geometries via SharedAssets
+ * - Uses glow sprites instead of expensive per-portal PointLights
+ * - Supports chunk visibility streaming while preserving proximity metadata
  */
 
 import * as THREE from 'three';
 import { PortalDefinition, PORTALS } from '../data/portals';
+import { SharedAssets } from '../engine/sharedAssets';
 
 export interface RuntimePortal {
   def: PortalDefinition;
   group: THREE.Group;
   vortexMesh: THREE.Mesh;
   rings: THREE.Group[];
-  light: THREE.PointLight;
 }
 
 export class PortalManager {
@@ -19,8 +21,7 @@ export class PortalManager {
   private isSoftwareGl: boolean;
   public group: THREE.Group;
   public activePortals: Map<string, RuntimePortal> = new Map();
-  private sharedGeometries: THREE.BufferGeometry[] = [];
-  private sharedMaterials: THREE.Material[] = [];
+  private ownedMaterials: THREE.Material[] = [];
 
   constructor(scene: THREE.Scene, isSoftwareGl = false) {
     this.scene = scene;
@@ -30,9 +31,6 @@ export class PortalManager {
     this.scene.add(this.group);
   }
 
-  /**
-   * Spawns only the portals relevant to the current region
-   */
   public populateForRegion(
     regionId: string,
     getTerrainHeight: (x: number, z: number) => number
@@ -41,21 +39,18 @@ export class PortalManager {
 
     const relevant = PORTALS.filter((p) => p.sourceRegionId === regionId);
 
-    // Shared reusable geometries
-    const archPillarGeo = new THREE.BoxGeometry(1.4, 8.5, 1.4);
-    const archLintelGeo = new THREE.BoxGeometry(7.2, 1.4, 1.8);
-    const daisGeo = new THREE.CylinderGeometry(4.6, 5.2, 0.8, 8);
-    const vortexGeo = new THREE.PlaneGeometry(4.6, 7.2);
-    const ringGeo = new THREE.TorusGeometry(3.2, 0.12, 8, 24);
-    const markerSpireGeo = new THREE.ConeGeometry(0.5, 1.8, 4);
+    const archPillarGeo = SharedAssets.getGeometry('portal_pillar', () => new THREE.BoxGeometry(1.4, 8.5, 1.4));
+    const archLintelGeo = SharedAssets.getGeometry('portal_lintel', () => new THREE.BoxGeometry(7.2, 1.4, 1.8));
+    const daisGeo = SharedAssets.getGeometry('portal_dais', () => new THREE.CylinderGeometry(4.6, 5.2, 0.8, 8));
+    const vortexGeo = SharedAssets.getGeometry('portal_vortex', () => new THREE.PlaneGeometry(4.6, 7.2));
+    const ringGeo = SharedAssets.getGeometry('portal_ring', () => new THREE.TorusGeometry(3.2, 0.12, 8, 22));
+    const markerSpireGeo = SharedAssets.getGeometry('portal_spire', () => new THREE.ConeGeometry(0.5, 1.8, 4));
 
-    this.sharedGeometries.push(
-      archPillarGeo,
-      archLintelGeo,
-      daisGeo,
-      vortexGeo,
-      ringGeo,
-      markerSpireGeo
+    const stoneReturnMat = SharedAssets.getMaterial('portal_stone_return', () =>
+      new THREE.MeshStandardMaterial({ color: 0x27272a, roughness: 0.85, metalness: 0.2 })
+    );
+    const stoneOutMat = SharedAssets.getMaterial('portal_stone_out', () =>
+      new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.85, metalness: 0.2 })
     );
 
     for (const portal of relevant) {
@@ -67,21 +62,13 @@ export class PortalManager {
       pGroup.position.set(px, py, pz);
       pGroup.rotation.y = portal.rotationY;
 
-      // Stone Material
-      const stoneMat = new THREE.MeshStandardMaterial({
-        color: portal.isReturnPortal ? 0x27272a : 0x1e293b,
-        roughness: 0.85,
-        metalness: 0.2,
-      });
-      this.sharedMaterials.push(stoneMat);
+      const stoneMat = portal.isReturnPortal ? stoneReturnMat : stoneOutMat;
 
-      // Dais
       const dais = new THREE.Mesh(daisGeo, stoneMat);
       dais.position.y = 0.4;
       dais.receiveShadow = !this.isSoftwareGl;
       pGroup.add(dais);
 
-      // Pillars
       const pillarL = new THREE.Mesh(archPillarGeo, stoneMat);
       pillarL.position.set(-2.8, 4.25, 0);
       pillarL.castShadow = !this.isSoftwareGl;
@@ -92,62 +79,56 @@ export class PortalManager {
       pillarR.castShadow = !this.isSoftwareGl;
       pGroup.add(pillarR);
 
-      // Lintel
       const lintel = new THREE.Mesh(archLintelGeo, stoneMat);
       lintel.position.set(0, 8.5, 0);
       lintel.castShadow = !this.isSoftwareGl;
       pGroup.add(lintel);
 
-      // Spires atop pillars
-      const spireMat = new THREE.MeshStandardMaterial({
-        color: portal.accentColor,
-        emissive: portal.glowColor,
-        emissiveIntensity: 0.6,
-        roughness: 0.2,
-      });
-      this.sharedMaterials.push(spireMat);
+      const spireMat = SharedAssets.getMaterial(`portal_spire_${portal.accentColor}`, () =>
+        new THREE.MeshStandardMaterial({
+          color: portal.accentColor,
+          emissive: portal.glowColor,
+          emissiveIntensity: 0.6,
+          roughness: 0.2,
+        })
+      );
 
       const spireL = new THREE.Mesh(markerSpireGeo, spireMat);
       spireL.position.set(-2.8, 9.4, 0);
-      pGroup.add(spireL);
-
       const spireR = new THREE.Mesh(markerSpireGeo, spireMat);
       spireR.position.set(2.8, 9.4, 0);
-      pGroup.add(spireR);
+      pGroup.add(spireL, spireR);
 
-      // Event Horizon Vortex
       const vortexMat = new THREE.MeshBasicMaterial({
         color: portal.vortexColor,
         transparent: true,
         opacity: 0.72,
         side: THREE.DoubleSide,
       });
-      this.sharedMaterials.push(vortexMat);
+      this.ownedMaterials.push(vortexMat);
 
       const vortex = new THREE.Mesh(vortexGeo, vortexMat);
       vortex.position.set(0, 4.5, 0);
       pGroup.add(vortex);
 
-      // Orbiting Concentric Ring
-      const ringMat = new THREE.MeshStandardMaterial({
-        color: portal.accentColor,
-        emissive: portal.glowColor,
-        emissiveIntensity: 0.4,
-        roughness: 0.3,
-        metalness: 0.8,
-      });
-      this.sharedMaterials.push(ringMat);
+      const ringMat = SharedAssets.getMaterial(`portal_ring_${portal.accentColor}`, () =>
+        new THREE.MeshStandardMaterial({
+          color: portal.accentColor,
+          emissive: portal.glowColor,
+          emissiveIntensity: 0.4,
+          roughness: 0.3,
+          metalness: 0.8,
+        })
+      );
 
       const ringGroup = new THREE.Group();
       ringGroup.position.set(0, 4.5, 0);
-      const ringMesh = new THREE.Mesh(ringGeo, ringMat);
-      ringGroup.add(ringMesh);
+      ringGroup.add(new THREE.Mesh(ringGeo, ringMat));
       pGroup.add(ringGroup);
 
-      // Portal Light
-      const pLight = new THREE.PointLight(portal.vortexColor, 1.8, 18);
-      pLight.position.set(0, 4.5, 0);
-      pGroup.add(pLight);
+      const glow = SharedAssets.createGlowSprite(portal.vortexColor, 6.2, 0.7);
+      glow.position.set(0, 4.5, 0);
+      pGroup.add(glow);
 
       this.group.add(pGroup);
 
@@ -156,36 +137,34 @@ export class PortalManager {
         group: pGroup,
         vortexMesh: vortex,
         rings: [ringGroup],
-        light: pLight,
       });
     }
   }
 
-  /**
-   * Per-frame animation for vortexes and concentric rings
-   */
+  public syncStreaming(isVisible: (x: number, z: number) => boolean): void {
+    this.activePortals.forEach((p) => {
+      p.group.visible = isVisible(p.def.position[0], p.def.position[2]);
+    });
+  }
+
   public update(delta: number, totalTime: number): void {
     let idx = 0;
     for (const p of this.activePortals.values()) {
-      // Bob and pulse vortex opacity
+      if (!p.group.visible) {
+        idx++;
+        continue;
+      }
       const mat = p.vortexMesh.material as THREE.MeshBasicMaterial;
       mat.opacity = 0.65 + Math.sin(totalTime * 2.5 + idx) * 0.15;
 
-      // Rotate rings
       p.rings.forEach((r, rIdx) => {
         r.rotation.y += delta * (0.8 + rIdx * 0.3);
         r.rotation.x = Math.sin(totalTime * 1.5 + rIdx) * 0.2;
       });
-
-      // Pulse light
-      p.light.intensity = 1.6 + Math.sin(totalTime * 3.0 + idx) * 0.4;
       idx++;
     }
   }
 
-  /**
-   * Check proximity to any active portal in the scene
-   */
   public getNearbyPortal(
     playerPos: [number, number, number],
     threshold = 4.5
@@ -207,20 +186,14 @@ export class PortalManager {
     return closest;
   }
 
-  /**
-   * Cleanly dispose active portal geometries and materials
-   */
   public clear(): void {
     this.activePortals.forEach((p) => {
       this.group.remove(p.group);
     });
     this.activePortals.clear();
 
-    this.sharedGeometries.forEach((g) => g.dispose());
-    this.sharedGeometries = [];
-
-    this.sharedMaterials.forEach((m) => m.dispose());
-    this.sharedMaterials = [];
+    this.ownedMaterials.forEach((m) => m.dispose());
+    this.ownedMaterials = [];
   }
 
   public dispose(): void {

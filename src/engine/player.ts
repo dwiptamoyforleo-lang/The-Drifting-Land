@@ -34,6 +34,8 @@ export class PlayerController {
   private dashDuration: number = 0;
   private isDashing: boolean = false;
   private stepDistance: number = 0;
+  private animTime: number = 0;
+  private shadowTex: THREE.CanvasTexture;
 
   // Character Mesh Components (6 distinct parts)
   private bodyMesh: THREE.Mesh;
@@ -168,6 +170,7 @@ export class PlayerController {
     sCtx.fillStyle = grad;
     sCtx.fillRect(0, 0, 64, 64);
     const shadowTex = new THREE.CanvasTexture(shadowCanvas);
+    this.shadowTex = shadowTex;
 
     const shadowMat = new THREE.MeshBasicMaterial({
       map: shadowTex,
@@ -245,6 +248,7 @@ export class PlayerController {
     onAbyssFall?: () => void
   ): void {
     const dt = Math.min(delta, 0.05); // clamped delta
+    this.animTime += dt;
 
     // 1. Handle Cooldowns & Timers
     if (this.dashCooldown > 0) this.dashCooldown -= dt;
@@ -361,8 +365,8 @@ export class PlayerController {
       }
 
       // Walking/running subtle tilt
-      this.bodyMesh.rotation.z = Math.sin(Date.now() * (isSprinting ? 0.02 : 0.012)) * 0.06;
-      this.scarfMesh.rotation.y = Math.PI / 2 + Math.sin(Date.now() * 0.01) * 0.18;
+      this.bodyMesh.rotation.z = Math.sin(this.animTime * (isSprinting ? 20 : 12)) * 0.06;
+      this.scarfMesh.rotation.y = Math.PI / 2 + Math.sin(this.animTime * 10) * 0.18;
     } else {
       this.velocity.x = THREE.MathUtils.damp(this.velocity.x, 0, 14, dt);
       this.velocity.z = THREE.MathUtils.damp(this.velocity.z, 0, 14, dt);
@@ -508,15 +512,29 @@ export class PlayerController {
     camera.lookAt(_lookTarget);
   }
 
+  public setQualityState(tier: 'low' | 'medium' | 'high', shadowsEnabled: boolean): void {
+    const cast = shadowsEnabled && tier !== 'low';
+    this.bodyMesh.castShadow = cast;
+    this.headMesh.castShadow = cast;
+    this.backpackMesh.castShadow = cast;
+    this.lanternLight.visible = tier !== 'low';
+  }
+
   /**
    * Free resources
    */
   dispose(): void {
-    this.bodyMesh.geometry.dispose();
-    this.headMesh.geometry.dispose();
-    this.visorMesh.geometry.dispose();
-    this.backpackMesh.geometry.dispose();
-    this.scarfMesh.geometry.dispose();
-    this.lanternMesh.geometry.dispose();
+    this.group.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (mesh.geometry) mesh.geometry.dispose();
+      if (mesh.material) {
+        if (Array.isArray(mesh.material)) {
+          mesh.material.forEach((m) => m.dispose());
+        } else {
+          mesh.material.dispose();
+        }
+      }
+    });
+    this.shadowTex?.dispose();
   }
 }

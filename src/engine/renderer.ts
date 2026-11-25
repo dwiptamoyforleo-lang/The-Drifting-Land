@@ -14,6 +14,7 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { GameSettings } from '../types/game';
+import { QualityConfig } from './performanceGovernor';
 
 export interface RendererBundle {
   renderer: THREE.WebGLRenderer;
@@ -23,6 +24,7 @@ export interface RendererBundle {
   hemiLight: THREE.HemisphereLight;
   rimLight: THREE.DirectionalLight;
   isSoftwareGl: boolean;
+  isMobile: boolean;
   pmremTexture: THREE.Texture;
   dispose: () => void;
 }
@@ -93,9 +95,10 @@ export class RenderPipeline {
     );
     camera.position.set(0, 15, 25);
 
-    // Renderer
+    // Renderer (disable AA on low/mobile/software for crisp fillrate on Android)
+    const enableAA = !isSoftwareGl && !isMobile && settings.graphicsQuality !== 'low';
     const renderer = new THREE.WebGLRenderer({
-      antialias: !isSoftwareGl && settings.graphicsQuality !== 'low',
+      antialias: enableAA,
       powerPreference: 'high-performance',
       stencil: false,
       alpha: false,
@@ -119,24 +122,24 @@ export class RenderPipeline {
     scene.environment = pmremTexture;
     pmremGenerator.dispose();
 
-    // Lighting setup
+    // Lighting setup (shared with DayNightSystem so there is only 1 directional shadow caster)
     const hemiLight = new THREE.HemisphereLight(0x7ec8e3, 0x1b3826, 0.7);
     scene.add(hemiLight);
 
     const keyLight = new THREE.DirectionalLight(0xfff3d6, 1.8);
     keyLight.position.set(45, 70, 30);
-    const d = 50;
+    const d = 48;
     keyLight.shadow.camera.left = -d;
     keyLight.shadow.camera.right = d;
     keyLight.shadow.camera.top = d;
     keyLight.shadow.camera.bottom = -d;
     keyLight.shadow.camera.near = 10;
-    keyLight.shadow.camera.far = 200;
+    keyLight.shadow.camera.far = 260;
     keyLight.shadow.bias = -0.0005;
     keyLight.shadow.normalBias = 0.02;
     scene.add(keyLight);
 
-    const rimLight = new THREE.DirectionalLight(0x4ade80, 0.4);
+    const rimLight = new THREE.DirectionalLight(0x4ade80, 0.35);
     rimLight.position.set(-30, 20, -30);
     scene.add(rimLight);
 
@@ -148,8 +151,13 @@ export class RenderPipeline {
       hemiLight,
       rimLight,
       isSoftwareGl,
+      isMobile,
       pmremTexture,
       dispose: () => {
+        if (keyLight.shadow.map) {
+          keyLight.shadow.map.dispose();
+          keyLight.shadow.map = null;
+        }
         pmremTexture.dispose();
         renderer.dispose();
         if (renderer.domElement && renderer.domElement.parentNode) {
@@ -177,7 +185,59 @@ export class RenderPipeline {
   }
 
   /**
-   * Dynamically apply performance presets and graphic settings
+   * Apply resolved QualityConfig from PerformanceGovernor + user settings
+   */
+  static applyQualityConfig(
+    bundle: RendererBundle,
+    settings: GameSettings,
+    config: QualityConfig,
+    width: number,
+    height: number
+  ): void {
+    const { renderer, camera, keyLight, scene } = bundle;
+
+    // 1. Pixel ratio cap
+    renderer.setPixelRatio(config.pixelRatioCap);
+    renderer.setSize(width, Math.max(height, 1));
+
+    // 2. Render distance & fog
+    camera.far = config.farPlane;
+    camera.fov = settings.fov || 65;
+    camera.updateProjectionMatrix();
+
+    if (scene.fog && 'density' in scene.fog) {
+      (scene.fog as THREE.FogExp2).density = config.fogDensity;
+    }
+
+    // 3. Single directional shadow map with clean disposal when dimensions change
+    const enableShadows = config.shadows && config.shadowMapSize > 0;
+    renderer.shadowMap.enabled = enableShadows;
+
+    if (enableShadows) {
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      keyLight.castShadow = true;
+      if (
+        keyLight.shadow.mapSize.width !== config.shadowMapSize ||
+        keyLight.shadow.mapSize.height !== config.shadowMapSize
+      ) {
+        if (keyLight.shadow.map) {
+          keyLight.shadow.map.dispose();
+          keyLight.shadow.map = null;
+        }
+        keyLight.shadow.mapSize.set(config.shadowMapSize, config.shadowMapSize);
+      }
+    } else {
+      keyLight.castShadow = false;
+      if (keyLight.shadow.map) {
+        keyLight.shadow.map.dispose();
+        keyLight.shadow.map = null;
+      }
+    }
+    renderer.shadowMap.needsUpdate = true;
+  }
+
+  /**
+   * Dynamically apply performance presets and graphic settings (non-governor fallback)
    */
   static applySettings(
     bundle: RendererBundle,
@@ -185,69 +245,66 @@ export class RenderPipeline {
     width: number,
     height: number
   ): void {
-    const { renderer, camera, keyLight, scene, isSoftwareGl } = bundle;
-    const isMobile = this.isMobileDevice();
-
-    // Determine effective preset
-    let effectiveQuality = settings.graphicsQuality;
-    if (effectiveQuality === 'auto') {
-      if (isSoftwareGl) {
-        effectiveQuality = 'low';
-      } else if (isMobile || (typeof navigator !== 'undefined' && navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4)) {
-        effectiveQuality = 'medium';
-      } else {
-        effectiveQuality = 'high';
-      }
-    }
-
-    // 1. Pixel Ratio limits
-    let targetPixelRatio = 1.0;
+    const { isSoftwareGl, isMobile } = bundle;
     const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
-    if (isSoftwareGl || effectiveQuality === 'low') {
-      targetPixelRatio = 1.0;
-    } else if (effectiveQuality === 'medium') {
-      targetPixelRatio = Math.min(dpr, 1.25);
-    } else {
-      targetPixelRatio = Math.min(dpr, 2.0);
-    }
-    renderer.setPixelRatio(targetPixelRatio);
-    renderer.setSize(width, height);
 
-    // 2. Render Distance & Fog
-    let farPlane = 180;
-    let fogDensity = 0.010;
-    if (settings.renderDistance === 'short' || effectiveQuality === 'low') {
-      farPlane = 90;
-      fogDensity = 0.016;
-    } else if (settings.renderDistance === 'medium') {
-      farPlane = 160;
-      fogDensity = 0.010;
+    let tier: 'low' | 'medium' | 'high';
+    if (settings.graphicsQuality === 'auto') {
+      if (isSoftwareGl) tier = 'low';
+      else if (isMobile || (typeof navigator !== 'undefined' && (navigator.hardwareConcurrency || 4) <= 4)) {
+        tier = isMobile && (navigator.hardwareConcurrency || 4) <= 4 ? 'low' : 'medium';
+      } else {
+        tier = 'high';
+      }
     } else {
-      farPlane = 260;
+      tier = settings.graphicsQuality;
+    }
+
+    const pixelRatioCap =
+      isSoftwareGl || tier === 'low'
+        ? 1.0
+        : tier === 'medium'
+        ? Math.min(dpr, isMobile ? 1.25 : 1.5)
+        : Math.min(dpr, isMobile ? 1.5 : 2.0);
+
+    let farPlane = 160;
+    let fogDensity = 0.01;
+    if (settings.renderDistance === 'short' || tier === 'low') {
+      farPlane = 95;
+      fogDensity = 0.015;
+    } else if (settings.renderDistance === 'medium' || tier === 'medium') {
+      farPlane = 160;
+      fogDensity = 0.01;
+    } else {
+      farPlane = 240;
       fogDensity = 0.007;
     }
-    camera.far = farPlane;
-    camera.fov = settings.fov || 65;
-    camera.updateProjectionMatrix();
 
-    if (scene.fog && 'density' in scene.fog) {
-      (scene.fog as THREE.FogExp2).density = fogDensity;
-    }
+    const shadowMapSize = tier === 'low' || isSoftwareGl ? 0 : tier === 'medium' ? 512 : 1024;
 
-    // 3. Dynamic Shadows
-    const enableShadows = settings.shadows && !isSoftwareGl && effectiveQuality !== 'low';
-    renderer.shadowMap.enabled = enableShadows;
-
-    if (enableShadows) {
-      const shadowSize = effectiveQuality === 'high' ? 2048 : 512;
-      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-      keyLight.castShadow = true;
-      keyLight.shadow.mapSize.width = shadowSize;
-      keyLight.shadow.mapSize.height = shadowSize;
-    } else {
-      keyLight.castShadow = false;
-    }
-    renderer.shadowMap.needsUpdate = true;
+    this.applyQualityConfig(
+      bundle,
+      settings,
+      {
+        tier,
+        isAuto: settings.graphicsQuality === 'auto',
+        pixelRatioCap,
+        activeLoadRadius: tier === 'low' ? 46 : tier === 'medium' ? 62 : 80,
+        activeUnloadRadius: tier === 'low' ? 58 : tier === 'medium' ? 76 : 96,
+        nearLoadRadius: tier === 'low' ? 92 : tier === 'medium' ? 128 : 175,
+        nearUnloadRadius: tier === 'low' ? 108 : tier === 'medium' ? 148 : 200,
+        farPlane,
+        fogDensity,
+        shadows: settings.shadows && !isSoftwareGl && tier !== 'low',
+        shadowMapSize,
+        vegetationDensity: tier === 'low' ? 0.45 : tier === 'medium' ? 0.75 : 1.0,
+        particleLimit: settings.particleLimit || 400,
+        entityCap: tier === 'low' ? 10 : tier === 'medium' ? 16 : 24,
+        maxPointLights: tier === 'low' ? 1 : tier === 'medium' ? 2 : 4,
+      },
+      width,
+      height
+    );
   }
 
   /**

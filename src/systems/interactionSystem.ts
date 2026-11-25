@@ -1,12 +1,7 @@
 /**
  * Reusable Interaction & Discovery Management System for The Drifting Land.
- * Enforces:
- * - Robust proximity detection with contextual prompt generation
- * - Unified execution across keyboard [E], mouse click, and touch action
- * - Mutex lock & debouncing to completely eliminate duplicate executions
- * - Immediate success & failure audio/visual feedback
- * - Comprehensive Checkpoint attunement with respawn anchor binding
- * - Discovery tracking with persistent collection records & notification toasts
+ * - Zero per-frame Vector3 allocations
+ * - Syncs unlocked doors, discovered chambers, deposits, and beacons with WorldStateStore
  */
 
 import * as THREE from 'three';
@@ -14,7 +9,6 @@ import {
   InteractableType,
   InteractionPrompt,
   SaveData,
-  DiscoveryDefinition,
 } from '../types/game';
 import { DISCOVERIES_CATALOG } from '../data/discoveries';
 import { AudioService } from '../services/audio';
@@ -23,6 +17,7 @@ import { InventorySystem } from './inventorySystem';
 import { QuestSystem } from './questSystem';
 import { CheckpointSystem } from './checkpointSystem';
 import { StructuresManager, RuntimeStructure } from '../engine/structures';
+import { WorldStateStore } from '../services/worldStateStore';
 
 export interface InteractionTarget {
   id: string;
@@ -31,17 +26,18 @@ export interface InteractionTarget {
   position: THREE.Vector3;
   interactionRadius: number;
   promptText: string;
-  action: () => boolean; // returns true if succeeded, false if failed
+  action: () => boolean;
 }
+
+const _tmpVec3 = new THREE.Vector3();
 
 export class InteractionSystem {
   private activePrompt: InteractionPrompt | null = null;
   private currentTarget: InteractionTarget | null = null;
   private isInteracting: boolean = false;
   private lastInteractTimestamp: number = 0;
-  private readonly INTERACTION_COOLDOWN_MS = 380; // 380ms debouncing guard
+  private readonly INTERACTION_COOLDOWN_MS = 380;
 
-  // Callbacks
   public onPromptChange?: (prompt: string | null) => void;
   public onCameraShake?: (intensity: number) => void;
   public onSaveRequested?: () => void;
@@ -52,43 +48,50 @@ export class InteractionSystem {
     private inventory: InventorySystem,
     private quests: QuestSystem,
     private checkpoints: CheckpointSystem,
-    private structures: StructuresManager
+    private structures: StructuresManager,
+    private worldStateStore?: WorldStateStore,
+    private regionId: string = 'verdant_reach'
   ) {}
 
-  /**
-   * Evaluate all nearby interactables against player position
-   */
+  public setRegion(regionId: string): void {
+    this.regionId = regionId;
+  }
+
+  private readonly cachedTargetPos = new THREE.Vector3();
+
   public update(playerPos: THREE.Vector3): InteractionPrompt | null {
-    let nearest: InteractionTarget | null = null;
+    let nearestStruct: RuntimeStructure | null = null;
     let minDistance = Infinity;
 
-    // 1. Structures from StructuresManager
-    this.structures.structures.forEach((struct) => {
-      const pos = new THREE.Vector3(...struct.position);
-      const dist = playerPos.distanceTo(pos);
+    for (const struct of this.structures.structures.values()) {
+      _tmpVec3.set(struct.position[0], struct.position[1], struct.position[2]);
+      const dist = playerPos.distanceTo(_tmpVec3);
 
       if (dist <= struct.interactionRadius && dist < minDistance) {
         minDistance = dist;
-        nearest = {
-          id: struct.id,
-          name: struct.name,
-          type: struct.type as InteractableType,
-          position: pos,
-          interactionRadius: struct.interactionRadius,
-          promptText: struct.promptText,
-          action: () => this.handleStructureInteraction(struct),
-        };
+        nearestStruct = struct;
       }
-    });
+    }
 
-    if (nearest) {
-      this.currentTarget = nearest;
-      const target = nearest as InteractionTarget;
+    if (nearestStruct) {
+      const s = nearestStruct;
+      this.cachedTargetPos.set(s.position[0], s.position[1], s.position[2]);
+      const target: InteractionTarget = {
+        id: s.id,
+        name: s.name,
+        type: s.type as InteractableType,
+        position: this.cachedTargetPos,
+        interactionRadius: s.interactionRadius,
+        promptText: s.promptText,
+        action: () => this.handleStructureInteraction(s),
+      };
+      this.currentTarget = target;
+
       const prompt: InteractionPrompt = {
-        id: target.id,
-        name: target.name,
-        type: target.type,
-        actionText: target.promptText,
+        id: s.id,
+        name: s.name,
+        type: s.type as InteractableType,
+        actionText: s.promptText,
         keyHint: '[E] or Action',
         distance: minDistance,
       };
@@ -108,13 +111,10 @@ export class InteractionSystem {
     }
   }
 
-  /**
-   * Execute interaction on current target with debounce lock
-   */
   public executeInteraction(): boolean {
     const now = Date.now();
     if (this.isInteracting || now - this.lastInteractTimestamp < this.INTERACTION_COOLDOWN_MS) {
-      return false; // Prevent multi-execution/rapid input race conditions
+      return false;
     }
 
     if (!this.currentTarget) {
@@ -137,63 +137,50 @@ export class InteractionSystem {
     }
   }
 
-  /**
-   * Route structure specific interactions
-   */
   private handleStructureInteraction(struct: RuntimeStructure): boolean {
     switch (struct.type) {
       case 'CHECKPOINT_BEACON':
         return this.handleBeaconActivation(struct);
-
       case 'RUINED_TOWER':
         return this.handleRuinedTower(struct);
-
       case 'HIDDEN_CHAMBER':
         return this.handleHiddenChamber(struct);
-
       case 'ABANDONED_SETTLEMENT':
         return this.handleAbandonedSettlement(struct);
-
       case 'RESEARCH_CAMP':
         return this.handleResearchCamp(struct);
-
       case 'LOCKED_DOOR':
         return this.handleLockedDoor(struct);
-
       case 'RESOURCE_DEPOSIT':
         return this.handleResourceDeposit(struct);
-
       case 'DIMENSIONAL_GATEWAY':
         return this.handleDimensionalGateway(struct);
-
       default:
         return false;
     }
   }
 
-  /**
-   * 1. Checkpoint Ancient Beacon Attunement
-   */
   private handleBeaconActivation(struct: RuntimeStructure): boolean {
     const cpId = struct.id;
-    const isAlreadyAttuned = this.save.activatedCheckpoints.includes(cpId);
 
-    // Save identity and location, update respawn anchor
     this.checkpoints.activateCheckpoint(cpId);
     if (!this.save.activatedCheckpoints.includes(cpId)) {
       this.save.activatedCheckpoints.push(cpId);
     }
     this.save.activeCheckpointId = cpId;
+    this.worldStateStore?.markStructureActivated(
+      this.regionId,
+      struct.position[0],
+      struct.position[2],
+      cpId
+    );
 
-    // Audio & Screen shake
     AudioService.playBeaconActivate();
     this.onCameraShake?.(0.65);
 
-    // Record discovery
     const discId = cpId === 'cp_eastern_ridge' ? 'disc_beacon_promontory' : 'disc_beacon_sanctum';
     this.recordDiscovery(discId);
 
-    // Toast feedback
     NotificationSystem.notify(
       'Ancient Beacon Attuned',
       `Sanctuary bound at ${struct.name}. Safe respawn anchor established.`,
@@ -206,12 +193,15 @@ export class InteractionSystem {
     return true;
   }
 
-  /**
-   * 2. Ruined Watchtower Summit Astrolabe
-   */
   private handleRuinedTower(struct: RuntimeStructure): boolean {
     AudioService.playRelicCollect();
     this.onCameraShake?.(0.4);
+    this.worldStateStore?.markStructureActivated(
+      this.regionId,
+      struct.position[0],
+      struct.position[2],
+      struct.id
+    );
 
     const hasLens = this.inventory.hasItem('astrolabe_lens', 1);
     if (!hasLens) {
@@ -223,15 +213,17 @@ export class InteractionSystem {
     return true;
   }
 
-  /**
-   * 3. Hidden Chamber (Concealed Subterranean Vault)
-   */
   private handleHiddenChamber(struct: RuntimeStructure): boolean {
     const isDiscovered = this.save.discoveredChambers.includes('hidden_chamber');
 
     if (!isDiscovered) {
-      // Dissolve the illusory wall
       this.save.discoveredChambers.push('hidden_chamber');
+      this.worldStateStore?.markChamberDiscovered(
+        this.regionId,
+        struct.position[0],
+        struct.position[2],
+        'hidden_chamber'
+      );
       this.structures.triggerDissolveHiddenWall();
       AudioService.playDoorUnlock();
       this.onCameraShake?.(0.6);
@@ -245,7 +237,6 @@ export class InteractionSystem {
       );
       return true;
     } else {
-      // Pick up the Codex of the First Drift if not yet collected
       const hasCodex = this.inventory.hasItem('codex_first_drift', 1);
       if (!hasCodex) {
         this.inventory.addItem('codex_first_drift', 1, false);
@@ -271,10 +262,7 @@ export class InteractionSystem {
     }
   }
 
-  /**
-   * 4. Abandoned Settlement (Pioneer Homestead)
-   */
-  private handleAbandonedSettlement(struct: RuntimeStructure): boolean {
+  private handleAbandonedSettlement(_struct: RuntimeStructure): boolean {
     const hasLedger = this.inventory.hasItem('settlement_ledger', 1);
     if (!hasLedger) {
       this.inventory.addItem('settlement_ledger', 1, false);
@@ -303,10 +291,7 @@ export class InteractionSystem {
     }
   }
 
-  /**
-   * 5. Research Camp (Surveyor Kaelen's Outpost)
-   */
-  private handleResearchCamp(struct: RuntimeStructure): boolean {
+  private handleResearchCamp(_struct: RuntimeStructure): boolean {
     AudioService.playUiClick();
     this.recordDiscovery('disc_research_camp');
 
@@ -329,9 +314,6 @@ export class InteractionSystem {
     return true;
   }
 
-  /**
-   * 6. Locked Door (Antiquity Sanctum Gate)
-   */
   private handleLockedDoor(struct: RuntimeStructure): boolean {
     const isUnlocked = this.save.unlockedDoors.includes('sanctum_arch_gate');
     if (isUnlocked) {
@@ -342,7 +324,6 @@ export class InteractionSystem {
 
     const hasKey = this.inventory.hasItem('sanctum_key', 1);
     if (!hasKey) {
-      // Failure feedback
       AudioService.playDoorLocked();
       this.onCameraShake?.(0.2);
       NotificationSystem.notify(
@@ -354,8 +335,13 @@ export class InteractionSystem {
       return false;
     }
 
-    // Success unlock!
     this.save.unlockedDoors.push('sanctum_arch_gate');
+    this.worldStateStore?.markDoorUnlocked(
+      this.regionId,
+      struct.position[0],
+      struct.position[2],
+      'sanctum_arch_gate'
+    );
     this.structures.triggerUnlockDoor();
     AudioService.playDoorUnlock();
     this.onCameraShake?.(0.5);
@@ -370,14 +356,11 @@ export class InteractionSystem {
     return true;
   }
 
-  /**
-   * 7. Resource Deposits (Lumicite & Aetherium)
-   */
   private handleResourceDeposit(struct: RuntimeStructure): boolean {
     const depositId = struct.id;
     const now = Date.now();
     const lastHarvest = this.save.harvestedDeposits[depositId] || 0;
-    const cooldownDuration = 30000; // 30 second node respawn cooldown
+    const cooldownDuration = 30000;
 
     if (now - lastHarvest < cooldownDuration) {
       const remainingSec = Math.ceil((cooldownDuration - (now - lastHarvest)) / 1000);
@@ -391,19 +374,25 @@ export class InteractionSystem {
       return false;
     }
 
-    // Success mining!
     this.save.harvestedDeposits[depositId] = now;
+    this.worldStateStore?.setDepositHarvested(
+      this.regionId,
+      struct.position[0],
+      struct.position[2],
+      depositId,
+      now
+    );
     AudioService.playMiningHit();
     this.onCameraShake?.(0.25);
 
     if (depositId === 'res_lumicite_vein') {
-      const qty = Math.floor(Math.random() * 2) + 2; // 2-3 crystals
+      const qty = Math.floor(Math.random() * 2) + 2;
       this.inventory.addItem('lumicite_shard', qty);
       this.quests.reportProgress('COLLECT', 'lumicite_shard', qty);
       this.recordDiscovery('disc_lumicite_vein');
       NotificationSystem.notify('Mined Lumicite', `Obtained ${qty}x Lumicite Crystals!`, 'item');
     } else {
-      const qty = Math.floor(Math.random() * 2) + 2; // 2-3 ore
+      const qty = Math.floor(Math.random() * 2) + 2;
       this.inventory.addItem('aetherium_ore', qty);
       this.quests.reportProgress('COLLECT', 'aetherium_ore', qty);
       this.recordDiscovery('disc_aetherium_deposit');
@@ -413,10 +402,7 @@ export class InteractionSystem {
     return true;
   }
 
-  /**
-   * 8. Dimensional Gateway (Arch of Astral Conflux)
-   */
-  private handleDimensionalGateway(struct: RuntimeStructure): boolean {
+  private handleDimensionalGateway(_struct: RuntimeStructure): boolean {
     AudioService.playGatewayTeleport();
     this.onCameraShake?.(0.9);
 
@@ -428,26 +414,20 @@ export class InteractionSystem {
       5500
     );
 
-    // Teleport player to the high Promontory Watchtower or Shattered Rift Island
     this.onTeleportRequested?.(38, 12, 25);
     return true;
   }
 
-  /**
-   * Record a discovery with rewards, notifications, and persistent tracking
-   */
   public recordDiscovery(discoveryId: string): void {
     if (this.save.discoveries.includes(discoveryId)) {
-      return; // Already discovered
+      return;
     }
 
     const def = DISCOVERIES_CATALOG[discoveryId];
     this.save.discoveries.push(discoveryId);
 
-    // Audio fanfare
     AudioService.playDiscoveryFanfare();
 
-    // Reward XP
     if (def?.experienceReward) {
       NotificationSystem.notify(
         `Discovery: ${def.name}`,
@@ -459,7 +439,6 @@ export class InteractionSystem {
       NotificationSystem.notify(`Discovered: ${def.name}`, def.subtitle, 'discovery', 5000);
     }
 
-    // Quest & Exploration progression triggers
     this.quests.reportProgress('DISCOVER', discoveryId, 1);
     this.quests.addExplorationXp(def?.experienceReward || 50);
 

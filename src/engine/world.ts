@@ -1,21 +1,17 @@
 /**
  * Multi-Dimension 3D World Generation & Resource Lifecycle for The Drifting Land.
- * Implements Prompt 11:
- * - 6 Playable Destinations:
- *   1. The Verdant Reach (Rolling green meadow, Whispering River, Monolith Beacon, pine & oak forests)
- *   2. The Shattered Highlands (Sheer vertical cliffs, floating needle islands, updraft wind rings)
- *   3. The Ashen Expanse (Volcanic basalt crags, glowing animated lava stream, smoldering cinder rocks)
- *   4. The Sunken Archive (Terraced stone terraces, rotating brass astrolabes, ancient record pedestals)
- *   5. The Moonveil Wilds (Perpetual twilight moss, towering bioluminescent mushrooms, floating spores)
- *   6. The Rift Frontier (Fractured tilted obsidian islands, anti-gravity void tears, gravitational distortions)
- * - Continuous mathematical elevation function tailored per region
- * - Clean disposal of all Three.js geometries, materials, and procedural textures
- * - No background simulation of inactive worlds
+ * - 6 Playable Destinations with continuous mathematical elevation
+ * - Chunk terrain & instanced foliage/rocks handled by ChunkManager (this module builds
+ *   lightweight base underside keel, cloud sea, river, Monolith Beacon, shards, and region landmarks)
+ * - Uses SharedAssets & glow sprites instead of excessive PointLights
+ * - Preserves cached procedural textures across region switches
  */
 
 import * as THREE from 'three';
 import { ShardRelic, BeaconStatus } from '../types/game';
 import { TextureGenerator } from './textures';
+import { SharedAssets } from './sharedAssets';
+import { QualityTier } from './performanceGovernor';
 
 export interface WorldBundle {
   group: THREE.Group;
@@ -31,10 +27,10 @@ export interface WorldBundle {
   };
   getTerrainHeight: (x: number, z: number) => number;
   update: (delta: number) => void;
+  syncChunkVisibility: (isVisible: (x: number, z: number) => boolean) => void;
+  setPointLightBudget: (tier: QualityTier) => void;
   dispose: () => void;
 }
-
-const _tempMatrix = new THREE.Matrix4();
 
 export class WorldGenerator {
   /**
@@ -55,7 +51,6 @@ export class WorldGenerator {
 
     switch (regionId) {
       case 'shattered_highlands': {
-        // High altitude stepped needle spires and cliffs
         const tier = Math.sin(x * 0.05) * 6.0 + Math.cos(z * 0.05) * 6.0;
         const needle = Math.max(0, 15 - Math.hypot(x - 20, z + 15) * 0.8) * 0.9;
         const ridge = Math.abs(x * 0.2) + Math.abs(z * 0.15);
@@ -63,14 +58,12 @@ export class WorldGenerator {
       }
 
       case 'ashen_expanse': {
-        // Volcanic jagged crags with central lava rift depression
         const crags = Math.sin(x * 0.08) * Math.cos(z * 0.08) * 3.5;
         const calderaDepression = dist < 24 ? -Math.cos((dist / 24) * (Math.PI / 2)) * 3.2 : 0;
         return (5.0 + crags + calderaDepression) * edgeFactor;
       }
 
       case 'sunken_archive': {
-        // Geometrical stone terraces and sunken courtyards
         const stepX = Math.floor((x + 60) / 15) * 0.8;
         const stepZ = Math.floor((z + 60) / 15) * 0.8;
         const courtyard = dist < 20 ? -1.5 : 0;
@@ -78,7 +71,6 @@ export class WorldGenerator {
       }
 
       case 'moonveil_wilds': {
-        // Undulating gentle twilight mounds
         const mound1 = Math.sin(x * 0.06) * 3.0;
         const mound2 = Math.cos(z * 0.05) * 2.5;
         const centralGrotto = dist < 18 ? 1.5 : 0;
@@ -86,20 +78,18 @@ export class WorldGenerator {
       }
 
       case 'rift_frontier': {
-        // Fractured anti-gravity floating chunks
         const wave = Math.sin(x * 0.09) * Math.sin(z * 0.09) * 5.0;
-        const tilt = (x * 0.08 - z * 0.06);
+        const tilt = x * 0.08 - z * 0.06;
         return (6.0 + wave + tilt) * edgeFactor;
       }
 
       case 'verdant_reach':
       default: {
-        // Natural rolling terrain harmonics
         const hill1 = Math.sin(x * 0.04) * Math.cos(z * 0.04) * 3.8;
         const hill2 = Math.sin(x * 0.08 + 1.2) * Math.sin(z * 0.07) * 2.0;
         const hill3 = Math.cos((x + z) * 0.02) * 2.2;
         const centerMound = Math.max(0, 16 - dist * 0.8) * 0.35;
-        const eastRidge = (x > 20 && Math.abs(z) < 30) ? (x - 20) * 0.18 : 0;
+        const eastRidge = x > 20 && Math.abs(z) < 30 ? (x - 20) * 0.18 : 0;
 
         const riverT = (z + 45) / 70;
         const riverTargetX = 10 + riverT * 38;
@@ -115,121 +105,47 @@ export class WorldGenerator {
     }
   }
 
-  /**
-   * Static helper for backward compatibility
-   */
   static getTerrainHeight(x: number, z: number): number {
     return this.getTerrainHeightForRegion('verdant_reach', x, z);
   }
 
   /**
-   * Construct 3D scene bundle for any destination
+   * Construct 3D landmark & atmosphere bundle for any destination.
+   * Chunked terrain & instanced foliage/rocks are streamed by ChunkManager.
    */
   static generate(regionId = 'verdant_reach', maxAnisotropy = 4, isSoftwareGl = false): WorldBundle {
     const worldGroup = new THREE.Group();
     worldGroup.name = `${regionId}_world`;
 
     const getHeight = (x: number, z: number) => this.getTerrainHeightForRegion(regionId, x, z);
-
-    // Track resources for clean disposal
-    const disposableGeometries: THREE.BufferGeometry[] = [];
-    const disposableMaterials: THREE.Material[] = [];
-    const disposableTextures: THREE.Texture[] = [];
-
-    // Shared procedural textures
     const stoneTex = TextureGenerator.createStoneTexture(maxAnisotropy);
-    disposableTextures.push(stoneTex);
 
-    // 1. Terrain Mesh (Plane displaced according to region elevation)
-    const terrainGeo = new THREE.PlaneGeometry(180, 180, 80, 80);
-    terrainGeo.rotateX(-Math.PI / 2);
-    disposableGeometries.push(terrainGeo);
-
-    const posAttr = terrainGeo.attributes.position;
-    for (let i = 0; i < posAttr.count; i++) {
-      const vx = posAttr.getX(i);
-      const vz = posAttr.getZ(i);
-      posAttr.setY(i, getHeight(vx, vz));
-    }
-    terrainGeo.computeVertexNormals();
-
-    // Material tailored per destination
-    let terrainMat: THREE.MeshStandardMaterial;
-    if (regionId === 'ashen_expanse') {
-      terrainMat = new THREE.MeshStandardMaterial({
-        map: stoneTex,
-        color: 0x27272a,
-        roughness: 0.9,
-        metalness: 0.25,
-      });
-    } else if (regionId === 'moonveil_wilds') {
-      terrainMat = new THREE.MeshStandardMaterial({
-        map: stoneTex,
-        color: 0x2e1065,
-        roughness: 0.8,
-        metalness: 0.1,
-      });
-    } else if (regionId === 'sunken_archive') {
-      terrainMat = new THREE.MeshStandardMaterial({
-        map: stoneTex,
-        color: 0x334155,
-        roughness: 0.75,
-        metalness: 0.35,
-      });
-    } else if (regionId === 'rift_frontier') {
-      terrainMat = new THREE.MeshStandardMaterial({
-        map: stoneTex,
-        color: 0x18181b,
-        roughness: 0.6,
-        metalness: 0.7,
-      });
-    } else if (regionId === 'shattered_highlands') {
-      terrainMat = new THREE.MeshStandardMaterial({
-        map: stoneTex,
-        color: 0x475569,
-        roughness: 0.85,
-        metalness: 0.15,
-      });
-    } else {
-      // Verdant Reach grass
-      const grassTex = TextureGenerator.createGrassTexture(maxAnisotropy);
-      disposableTextures.push(grassTex);
-      terrainMat = new THREE.MeshStandardMaterial({
-        map: grassTex,
-        roughness: 0.85,
-        metalness: 0.05,
-      });
-    }
-    disposableMaterials.push(terrainMat);
-
-    const terrainMesh = new THREE.Mesh(terrainGeo, terrainMat);
-    terrainMesh.receiveShadow = !isSoftwareGl;
-    worldGroup.add(terrainMesh);
-
-    // 2. Fractured Underside Keel
-    const undersideMat = new THREE.MeshStandardMaterial({
-      map: stoneTex,
-      color: regionId === 'ashen_expanse' ? 0x18181b : 0x334155,
-      roughness: 0.9,
-      metalness: 0.2,
-      flatShading: true,
+    // 1. Fractured Underside Keel (shared geometry, lightweight 14-seg cone)
+    const undersideGeo = SharedAssets.getGeometry('world_underside_keel', () => {
+      const g = new THREE.ConeGeometry(82, 55, 14, 3, true);
+      g.rotateX(Math.PI);
+      g.translate(0, -27, 0);
+      return g;
     });
-    disposableMaterials.push(undersideMat);
-
-    const undersideGeo = new THREE.ConeGeometry(82, 55, 18, 6, true);
-    undersideGeo.rotateX(Math.PI);
-    undersideGeo.translate(0, -27, 0);
-    disposableGeometries.push(undersideGeo);
-
+    const undersideMat = SharedAssets.getMaterial(`world_underside_${regionId === 'ashen_expanse' ? 'ashen' : 'stone'}`, () =>
+      new THREE.MeshStandardMaterial({
+        map: stoneTex,
+        color: regionId === 'ashen_expanse' ? 0x18181b : 0x334155,
+        roughness: 0.9,
+        metalness: 0.2,
+        flatShading: true,
+      })
+    );
     const undersideMesh = new THREE.Mesh(undersideGeo, undersideMat);
     undersideMesh.receiveShadow = !isSoftwareGl;
     worldGroup.add(undersideMesh);
 
-    // 3. Ambient Cloud Sea / Abyssal Void Plane
-    const cloudGeo = new THREE.PlaneGeometry(600, 600, 8, 8);
-    cloudGeo.rotateX(-Math.PI / 2);
-    disposableGeometries.push(cloudGeo);
-
+    // 2. Ambient Cloud Sea / Abyssal Void Plane
+    const cloudGeo = SharedAssets.getGeometry('world_cloud_sea', () => {
+      const g = new THREE.PlaneGeometry(600, 600, 2, 2);
+      g.rotateX(-Math.PI / 2);
+      return g;
+    });
     const cloudColor =
       regionId === 'ashen_expanse'
         ? 0x2b0d06
@@ -238,102 +154,81 @@ export class WorldGenerator {
         : regionId === 'rift_frontier'
         ? 0x0f031e
         : 0x1e293b;
-
-    const cloudMat = new THREE.MeshBasicMaterial({
-      color: cloudColor,
-      transparent: true,
-      opacity: 0.55,
-      depthWrite: false,
-    });
-    disposableMaterials.push(cloudMat);
-
+    const cloudMat = SharedAssets.getMaterial(`world_cloud_mat_${regionId}`, () =>
+      new THREE.MeshBasicMaterial({
+        color: cloudColor,
+        transparent: true,
+        opacity: 0.55,
+        depthWrite: false,
+      })
+    );
     const cloudMesh = new THREE.Mesh(cloudGeo, cloudMat);
     cloudMesh.position.y = -35;
     worldGroup.add(cloudMesh);
 
-    // Dynamic animators list
     const animators: ((delta: number, totalTime: number) => void)[] = [];
+    const managedLights: THREE.PointLight[] = [];
+    const streamObjects: { obj: THREE.Object3D; x: number; z: number; checkCollected?: () => boolean }[] = [];
 
-    // Region-specific Landmark & Decor generation
     let beaconBundle: WorldBundle['beacon'] = undefined;
     const shardsMap = new Map<string, { mesh: THREE.Group; data: ShardRelic }>();
 
     if (regionId === 'verdant_reach') {
-      // Build Verdant Reach specific decor (River, Bridge, Beacon, Shards, Trees)
       this.buildVerdantFeatures(
         worldGroup,
         getHeight,
         stoneTex,
         maxAnisotropy,
         isSoftwareGl,
-        disposableGeometries,
-        disposableMaterials,
-        disposableTextures,
         animators,
+        managedLights,
+        streamObjects,
         shardsMap,
         (b) => {
           beaconBundle = b;
         }
       );
     } else if (regionId === 'shattered_highlands') {
-      this.buildHighlandsFeatures(
-        worldGroup,
-        getHeight,
-        isSoftwareGl,
-        disposableGeometries,
-        disposableMaterials,
-        animators
-      );
+      this.buildHighlandsFeatures(worldGroup, getHeight, isSoftwareGl, animators, streamObjects);
     } else if (regionId === 'ashen_expanse') {
-      this.buildAshenFeatures(
-        worldGroup,
-        getHeight,
-        isSoftwareGl,
-        disposableGeometries,
-        disposableMaterials,
-        animators
-      );
+      this.buildAshenFeatures(worldGroup, getHeight, animators, managedLights, streamObjects);
     } else if (regionId === 'sunken_archive') {
-      this.buildArchiveFeatures(
-        worldGroup,
-        getHeight,
-        isSoftwareGl,
-        disposableGeometries,
-        disposableMaterials,
-        animators
-      );
+      this.buildArchiveFeatures(worldGroup, getHeight, animators, managedLights, streamObjects);
     } else if (regionId === 'moonveil_wilds') {
-      this.buildMoonveilFeatures(
-        worldGroup,
-        getHeight,
-        isSoftwareGl,
-        disposableGeometries,
-        disposableMaterials,
-        animators
-      );
+      this.buildMoonveilFeatures(worldGroup, getHeight, animators, streamObjects);
     } else if (regionId === 'rift_frontier') {
-      this.buildRiftFeatures(
-        worldGroup,
-        getHeight,
-        isSoftwareGl,
-        disposableGeometries,
-        disposableMaterials,
-        animators
-      );
+      this.buildRiftFeatures(worldGroup, getHeight, animators, managedLights, streamObjects);
     }
 
     let totalWorldTime = 0;
     const update = (delta: number) => {
       totalWorldTime += delta;
-      for (const fn of animators) {
-        fn(delta, totalWorldTime);
+      for (let i = 0; i < animators.length; i++) {
+        animators[i](delta, totalWorldTime);
+      }
+    };
+
+    const syncChunkVisibility = (isVisible: (x: number, z: number) => boolean) => {
+      for (let i = 0; i < streamObjects.length; i++) {
+        const entry = streamObjects[i];
+        if (entry.checkCollected && entry.checkCollected()) {
+          entry.obj.visible = false;
+        } else {
+          entry.obj.visible = isVisible(entry.x, entry.z);
+        }
+      }
+    };
+
+    const setPointLightBudget = (tier: QualityTier) => {
+      const allowFocalLight = !isSoftwareGl && tier !== 'low';
+      for (let i = 0; i < managedLights.length; i++) {
+        managedLights[i].visible = allowFocalLight && i === 0;
       }
     };
 
     const dispose = () => {
-      disposableGeometries.forEach((g) => g.dispose());
-      disposableMaterials.forEach((m) => m.dispose());
-      disposableTextures.forEach((t) => t.dispose());
+      // Safely disposes unique world geometries/materials while preserving SharedAssets & TextureGenerator caches
+      SharedAssets.disposeObject3DSafe(worldGroup);
     };
 
     return {
@@ -343,36 +238,30 @@ export class WorldGenerator {
       beacon: beaconBundle,
       getTerrainHeight: getHeight,
       update,
+      syncChunkVisibility,
+      setPointLightBudget,
       dispose,
     };
   }
 
-  /**
-   * Destination I: The Verdant Reach Landmark Features
-   */
   private static buildVerdantFeatures(
     worldGroup: THREE.Group,
     getHeight: (x: number, z: number) => number,
     stoneTex: THREE.Texture,
     maxAnisotropy: number,
     isSoftwareGl: boolean,
-    geos: THREE.BufferGeometry[],
-    mats: THREE.Material[],
-    textures: THREE.Texture[],
     animators: ((dt: number, total: number) => void)[],
+    managedLights: THREE.PointLight[],
+    streamObjects: { obj: THREE.Object3D; x: number; z: number; checkCollected?: () => boolean }[],
     shardsMap: Map<string, { mesh: THREE.Group; data: ShardRelic }>,
     setBeacon: (b: NonNullable<WorldBundle['beacon']>) => void
   ): void {
     const waterTex = TextureGenerator.createWaterTexture(maxAnisotropy);
-    const pathTex = TextureGenerator.createPathTexture(maxAnisotropy);
-    const barkTex = TextureGenerator.createBarkTexture(maxAnisotropy);
-    textures.push(waterTex, pathTex, barkTex);
 
     // River
-    const riverGeo = new THREE.PlaneGeometry(16, 75, 12, 32);
+    const riverGeo = new THREE.PlaneGeometry(16, 75, 10, 24);
     riverGeo.rotateX(-Math.PI / 2);
     riverGeo.rotateY(Math.PI / 4);
-    geos.push(riverGeo);
 
     const rPos = riverGeo.attributes.position;
     for (let i = 0; i < rPos.count; i++) {
@@ -384,85 +273,86 @@ export class WorldGenerator {
     }
     riverGeo.computeVertexNormals();
 
-    const waterMat = new THREE.MeshStandardMaterial({
-      map: waterTex,
-      color: 0x67e8f9,
-      roughness: 0.15,
-      metalness: 0.8,
-      transparent: true,
-      opacity: 0.78,
-    });
-    mats.push(waterMat);
+    const waterMat = SharedAssets.getMaterial('world_river_water_mat', () =>
+      new THREE.MeshStandardMaterial({
+        map: waterTex,
+        color: 0x67e8f9,
+        roughness: 0.15,
+        metalness: 0.8,
+        transparent: true,
+        opacity: 0.78,
+      })
+    );
 
     const riverMesh = new THREE.Mesh(riverGeo, waterMat);
     riverMesh.receiveShadow = !isSoftwareGl;
     worldGroup.add(riverMesh);
 
-    // Animated water UV scroll
     animators.push((_dt, total) => {
       waterTex.offset.x = (total * 0.08) % 1.0;
       waterTex.offset.y = (total * 0.03) % 1.0;
     });
 
     // Monolith Beacon Plaza
-    const stoneMat = new THREE.MeshStandardMaterial({ map: stoneTex, roughness: 0.85, metalness: 0.15 });
-    mats.push(stoneMat);
+    const stoneMat = SharedAssets.getMaterial('world_stone_mat', () =>
+      new THREE.MeshStandardMaterial({ map: stoneTex, roughness: 0.85, metalness: 0.15 })
+    );
 
     const beaconGroup = new THREE.Group();
     beaconGroup.name = 'ancient_beacon';
     beaconGroup.position.set(0, getHeight(0, 0), 0);
 
-    const daisGeo = new THREE.CylinderGeometry(8.5, 9.5, 1.2, 8);
-    geos.push(daisGeo);
+    const daisGeo = SharedAssets.getGeometry('beacon_dais', () => new THREE.CylinderGeometry(8.5, 9.5, 1.2, 8));
     const daisMesh = new THREE.Mesh(daisGeo, stoneMat);
     daisMesh.position.y = 0.6;
     beaconGroup.add(daisMesh);
 
-    // Concentric Bronze Rings
-    const ringMat = new THREE.MeshStandardMaterial({
-      color: 0xd97706,
-      metalness: 0.9,
-      roughness: 0.25,
-      emissive: 0x78350f,
-      emissiveIntensity: 0.25,
-    });
-    mats.push(ringMat);
+    const ringMat = SharedAssets.getMaterial('beacon_bronze_ring', () =>
+      new THREE.MeshStandardMaterial({
+        color: 0xd97706,
+        metalness: 0.9,
+        roughness: 0.25,
+        emissive: 0x78350f,
+        emissiveIntensity: 0.25,
+      })
+    );
 
     const ring1Group = new THREE.Group();
-    const ring1Geo = new THREE.TorusGeometry(3.4, 0.18, 12, 32);
-    geos.push(ring1Geo);
+    const ring1Geo = SharedAssets.getGeometry('beacon_ring_outer', () => new THREE.TorusGeometry(3.4, 0.18, 10, 28));
     ring1Group.add(new THREE.Mesh(ring1Geo, ringMat));
     ring1Group.position.set(0, 5.2, 0);
     beaconGroup.add(ring1Group);
 
     const ring2Group = new THREE.Group();
-    const ring2Geo = new THREE.TorusGeometry(2.4, 0.15, 12, 28);
-    geos.push(ring2Geo);
+    const ring2Geo = SharedAssets.getGeometry('beacon_ring_inner', () => new THREE.TorusGeometry(2.4, 0.15, 10, 24));
     ring2Group.add(new THREE.Mesh(ring2Geo, ringMat));
     ring2Group.position.set(0, 5.2, 0);
     beaconGroup.add(ring2Group);
 
-    // Hovering Emerald Power Core
-    const coreGeo = new THREE.DodecahedronGeometry(1.1, 0);
-    geos.push(coreGeo);
-    const coreMat = new THREE.MeshStandardMaterial({
-      color: 0x34d399,
-      emissive: 0x10b981,
-      emissiveIntensity: 0.85,
-      roughness: 0.15,
-      metalness: 0.85,
-    });
-    mats.push(coreMat);
+    const coreGeo = SharedAssets.getGeometry('beacon_core', () => new THREE.DodecahedronGeometry(1.1, 0));
+    const coreMat = SharedAssets.getMaterial('beacon_core_mat', () =>
+      new THREE.MeshStandardMaterial({
+        color: 0x34d399,
+        emissive: 0x10b981,
+        emissiveIntensity: 0.85,
+        roughness: 0.15,
+        metalness: 0.85,
+      })
+    );
     const coreMesh = new THREE.Mesh(coreGeo, coreMat);
     coreMesh.position.set(0, 5.2, 0);
     beaconGroup.add(coreMesh);
 
+    const coreGlow = SharedAssets.createGlowSprite(0x34d399, 5.5, 0.72);
+    coreGlow.position.set(0, 5.2, 0);
+    beaconGroup.add(coreGlow);
+
     const beaconLight = new THREE.PointLight(0x34d399, 1.8, 32);
     beaconLight.position.set(0, 5.4, 0);
     beaconGroup.add(beaconLight);
+    managedLights.push(beaconLight);
 
-    const beamGeo = new THREE.CylinderGeometry(0.7, 1.3, 140, 16, 1, true);
-    geos.push(beamGeo);
+    const beamGeo = SharedAssets.getGeometry('beacon_beam', () => new THREE.CylinderGeometry(0.7, 1.3, 140, 14, 1, true));
     const beamMat = new THREE.MeshBasicMaterial({
       color: 0x6ee7b7,
       transparent: true,
@@ -470,12 +360,12 @@ export class WorldGenerator {
       side: THREE.DoubleSide,
       depthWrite: false,
     });
-    mats.push(beamMat);
     const beamMesh = new THREE.Mesh(beamGeo, beamMat);
     beamMesh.position.set(0, 70, 0);
     beaconGroup.add(beamMesh);
 
     worldGroup.add(beaconGroup);
+    streamObjects.push({ obj: beaconGroup, x: 0, z: 0 });
 
     const beaconData: BeaconStatus = {
       id: 'verdant_monolith_beacon',
@@ -494,8 +384,8 @@ export class WorldGenerator {
       data: beaconData,
     });
 
-    // Beacon ring animators
     animators.push((dt, total) => {
+      if (!beaconGroup.visible) return;
       ring1Group.rotation.x += dt * 0.45;
       ring1Group.rotation.y += dt * 0.35;
       ring2Group.rotation.z += dt * 0.55;
@@ -509,11 +399,13 @@ export class WorldGenerator {
           beamMat.opacity = Math.min(0.85, beamMat.opacity + dt * 0.6);
         }
         beamMesh.rotation.y += dt * 0.5;
-        beaconLight.intensity = 2.5 + Math.sin(total * 4) * 0.6;
+        if (beaconLight.visible) {
+          beaconLight.intensity = 2.5 + Math.sin(total * 4) * 0.6;
+        }
       }
     });
 
-    // Collectible Drift Shards
+    // Collectible Drift Shards (use baked glow sprites instead of 4 extra PointLights)
     const shardConfigs: ShardRelic[] = [
       { id: 'shard_verdant_heart', name: 'Verdant Heart Shard', region: 'The Verdant Reach', position: [-34, 0, 18], collected: false, loreSnippet: 'Primeval plant resonance.', element: 'verdant' },
       { id: 'shard_sunward_ridge', name: 'Sunward Crest Shard', region: 'The Verdant Reach', position: [38, 0, 25], collected: false, loreSnippet: 'Celestial dawn light.', element: 'solar' },
@@ -528,6 +420,8 @@ export class WorldGenerator {
       lunar: { color: 0xc084fc, emissive: 0x7e22ce },
     };
 
+    const shardGeo = SharedAssets.getGeometry('world_drift_shard', () => new THREE.OctahedronGeometry(0.7, 0));
+
     shardConfigs.forEach((sc) => {
       const sy = getHeight(sc.position[0], sc.position[2]) + 1.6;
       sc.position[1] = sy;
@@ -536,28 +430,31 @@ export class WorldGenerator {
       sGroup.position.set(sc.position[0], sy, sc.position[2]);
 
       const colors = elementColors[sc.element] || elementColors.verdant;
-      const cGeo = new THREE.OctahedronGeometry(0.7, 0);
-      geos.push(cGeo);
-      const cMat = new THREE.MeshStandardMaterial({
-        color: colors.color,
-        emissive: colors.emissive,
-        emissiveIntensity: 0.95,
-        roughness: 0.15,
-        metalness: 0.85,
-      });
-      mats.push(cMat);
-      sGroup.add(new THREE.Mesh(cGeo, cMat));
-
-      const sLight = new THREE.PointLight(colors.color, 0.9, 10);
-      sGroup.add(sLight);
+      const cMat = SharedAssets.getMaterial(`shard_mat_${sc.element}`, () =>
+        new THREE.MeshStandardMaterial({
+          color: colors.color,
+          emissive: colors.emissive,
+          emissiveIntensity: 0.95,
+          roughness: 0.15,
+          metalness: 0.85,
+        })
+      );
+      sGroup.add(new THREE.Mesh(shardGeo, cMat));
+      sGroup.add(SharedAssets.createGlowSprite(colors.color, 2.8, 0.8));
 
       worldGroup.add(sGroup);
       shardsMap.set(sc.id, { mesh: sGroup, data: sc });
+      streamObjects.push({
+        obj: sGroup,
+        x: sc.position[0],
+        z: sc.position[2],
+        checkCollected: () => sc.collected,
+      });
     });
 
     animators.push((dt, total) => {
       shardsMap.forEach((entry) => {
-        if (!entry.data.collected) {
+        if (!entry.data.collected && entry.mesh.visible) {
           entry.mesh.rotation.y += dt * 1.5;
           const baseY = entry.data.position[1];
           entry.mesh.position.y = baseY + Math.sin(total * 2.5 + entry.mesh.position.x) * 0.25;
@@ -566,29 +463,23 @@ export class WorldGenerator {
     });
   }
 
-  /**
-   * Destination II: The Shattered Highlands
-   */
   private static buildHighlandsFeatures(
     worldGroup: THREE.Group,
     getHeight: (x: number, z: number) => number,
     isSoftwareGl: boolean,
-    geos: THREE.BufferGeometry[],
-    mats: THREE.Material[],
-    animators: ((dt: number, total: number) => void)[]
+    animators: ((dt: number, total: number) => void)[],
+    streamObjects: { obj: THREE.Object3D; x: number; z: number }[]
   ): void {
-    // Updraft Wind Rings (interactive floating golden rings that animate)
-    const ringGeo = new THREE.TorusGeometry(3.5, 0.25, 8, 24);
-    geos.push(ringGeo);
-
-    const windMat = new THREE.MeshStandardMaterial({
-      color: 0x38bdf8,
-      emissive: 0x0284c7,
-      emissiveIntensity: 0.8,
-      transparent: true,
-      opacity: 0.8,
-    });
-    mats.push(windMat);
+    const ringGeo = SharedAssets.getGeometry('highlands_wind_ring', () => new THREE.TorusGeometry(3.5, 0.25, 8, 22));
+    const windMat = SharedAssets.getMaterial('highlands_wind_mat', () =>
+      new THREE.MeshStandardMaterial({
+        color: 0x38bdf8,
+        emissive: 0x0284c7,
+        emissiveIntensity: 0.8,
+        transparent: true,
+        opacity: 0.8,
+      })
+    );
 
     const updraftPoints: [number, number][] = [
       [15, -12],
@@ -597,34 +488,35 @@ export class WorldGenerator {
       [-15, -28],
     ];
 
-    const windRings: THREE.Mesh[] = [];
+    const windRings: { mesh: THREE.Mesh; baseY: number }[] = [];
 
-    updraftPoints.forEach(([ux, uz], i) => {
+    updraftPoints.forEach(([ux, uz]) => {
       const uy = getHeight(ux, uz) + 4.0;
-      const ring = new THREE.Mesh(ringGeo, windMat);
-      ring.position.set(ux, uy, uz);
-      ring.rotation.x = Math.PI / 2;
-      worldGroup.add(ring);
-      windRings.push(ring);
+      const ringGrp = new THREE.Group();
+      ringGrp.position.set(ux, uy, uz);
 
-      // Updraft vertical light
-      const uLight = new THREE.PointLight(0x38bdf8, 1.2, 16);
-      uLight.position.set(ux, uy, uz);
-      worldGroup.add(uLight);
+      const ring = new THREE.Mesh(ringGeo, windMat);
+      ring.rotation.x = Math.PI / 2;
+      ringGrp.add(ring);
+      ringGrp.add(SharedAssets.createGlowSprite(0x38bdf8, 4.8, 0.6));
+
+      worldGroup.add(ringGrp);
+      windRings.push({ mesh: ring, baseY: 0 });
+      streamObjects.push({ obj: ringGrp, x: ux, z: uz });
     });
 
     animators.push((dt, total) => {
-      windRings.forEach((r, idx) => {
-        r.rotation.z += dt * (1.2 + idx * 0.2);
-        r.position.y += Math.sin(total * 2.0 + idx) * 0.03;
+      windRings.forEach((entry, idx) => {
+        if (!entry.mesh.parent?.visible) return;
+        entry.mesh.rotation.z += dt * (1.2 + idx * 0.2);
+        entry.mesh.position.y = entry.baseY + Math.sin(total * 2.0 + idx) * 0.25;
       });
     });
 
-    // Soaring needle spires
-    const spireGeo = new THREE.ConeGeometry(3.5, 28, 6);
-    geos.push(spireGeo);
-    const spireMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.9, flatShading: true });
-    mats.push(spireMat);
+    const spireGeo = SharedAssets.getGeometry('highlands_spire', () => new THREE.ConeGeometry(3.5, 28, 6));
+    const spireMat = SharedAssets.getMaterial('highlands_spire_mat', () =>
+      new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.9, flatShading: true })
+    );
 
     const spireLocations: [number, number][] = [
       [-35, -15],
@@ -639,53 +531,53 @@ export class WorldGenerator {
       spire.position.set(sx, sy + 14, sz);
       spire.castShadow = !isSoftwareGl;
       worldGroup.add(spire);
+      streamObjects.push({ obj: spire, x: sx, z: sz });
     });
   }
 
-  /**
-   * Destination III: The Ashen Expanse (Volcanic Basalt & Lava Fissure)
-   */
   private static buildAshenFeatures(
     worldGroup: THREE.Group,
     getHeight: (x: number, z: number) => number,
-    isSoftwareGl: boolean,
-    geos: THREE.BufferGeometry[],
-    mats: THREE.Material[],
-    animators: ((dt: number, total: number) => void)[]
+    animators: ((dt: number, total: number) => void)[],
+    managedLights: THREE.PointLight[],
+    streamObjects: { obj: THREE.Object3D; x: number; z: number }[]
   ): void {
-    // Glowing bubbling magma fissure in the central depression
-    const lavaGeo = new THREE.PlaneGeometry(28, 60, 10, 20);
-    lavaGeo.rotateX(-Math.PI / 2);
-    geos.push(lavaGeo);
-
-    const lavaMat = new THREE.MeshStandardMaterial({
-      color: 0xf97316,
-      emissive: 0xea580c,
-      emissiveIntensity: 0.95,
-      roughness: 0.2,
-      metalness: 0.8,
+    const lavaGeo = SharedAssets.getGeometry('ashen_lava_fissure', () => {
+      const g = new THREE.PlaneGeometry(28, 60, 8, 16);
+      g.rotateX(-Math.PI / 2);
+      return g;
     });
-    mats.push(lavaMat);
+
+    const lavaMat = SharedAssets.getMaterial('ashen_lava_mat', () =>
+      new THREE.MeshStandardMaterial({
+        color: 0xf97316,
+        emissive: 0xea580c,
+        emissiveIntensity: 0.95,
+        roughness: 0.2,
+        metalness: 0.8,
+      })
+    );
 
     const lavaMesh = new THREE.Mesh(lavaGeo, lavaMat);
     lavaMesh.position.set(0, 1.8, 0);
     worldGroup.add(lavaMesh);
 
-    // Dynamic lava heat point light
     const lavaLight = new THREE.PointLight(0xf97316, 2.5, 45);
     lavaLight.position.set(0, 4.0, 0);
     worldGroup.add(lavaLight);
+    managedLights.push(lavaLight);
 
     animators.push((_dt, total) => {
       lavaMat.emissiveIntensity = 0.85 + Math.sin(total * 3.0) * 0.25;
-      lavaLight.intensity = 2.2 + Math.sin(total * 3.5) * 0.5;
+      if (lavaLight.visible) {
+        lavaLight.intensity = 2.2 + Math.sin(total * 3.5) * 0.5;
+      }
     });
 
-    // Basalt hexagonal cooling columns
-    const colGeo = new THREE.CylinderGeometry(1.4, 1.5, 9, 6);
-    geos.push(colGeo);
-    const colMat = new THREE.MeshStandardMaterial({ color: 0x18181b, roughness: 0.95, flatShading: true });
-    mats.push(colMat);
+    const colGeo = SharedAssets.getGeometry('ashen_basalt_col', () => new THREE.CylinderGeometry(1.4, 1.5, 9, 6));
+    const colMat = SharedAssets.getMaterial('ashen_basalt_col_mat', () =>
+      new THREE.MeshStandardMaterial({ color: 0x18181b, roughness: 0.95, flatShading: true })
+    );
 
     const colPositions: [number, number][] = [
       [-18, 12],
@@ -696,64 +588,67 @@ export class WorldGenerator {
       [26, 22],
     ];
 
+    const colInst = new THREE.InstancedMesh(colGeo, colMat, colPositions.length);
+    const dummy = new THREE.Object3D();
     colPositions.forEach(([cx, cz], i) => {
       const cy = getHeight(cx, cz);
-      const col = new THREE.Mesh(colGeo, colMat);
-      col.position.set(cx, cy + 4.5, cz);
-      col.rotation.y = (i * Math.PI) / 3;
-      worldGroup.add(col);
+      dummy.position.set(cx, cy + 4.5, cz);
+      dummy.rotation.set(0, (i * Math.PI) / 3, 0);
+      dummy.scale.setScalar(1);
+      dummy.updateMatrix();
+      colInst.setMatrixAt(i, dummy.matrix);
     });
+    colInst.instanceMatrix.needsUpdate = true;
+    worldGroup.add(colInst);
+    streamObjects.push({ obj: lavaMesh, x: 0, z: 0 });
   }
 
-  /**
-   * Destination IV: The Sunken Archive (Forgotten Technology & Astrolabes)
-   */
   private static buildArchiveFeatures(
     worldGroup: THREE.Group,
     getHeight: (x: number, z: number) => number,
-    _isSoftwareGl: boolean,
-    geos: THREE.BufferGeometry[],
-    mats: THREE.Material[],
-    animators: ((dt: number, total: number) => void)[]
+    animators: ((dt: number, total: number) => void)[],
+    managedLights: THREE.PointLight[],
+    streamObjects: { obj: THREE.Object3D; x: number; z: number }[]
   ): void {
-    // Grand Central Astrolabe mechanism
     const astroGroup = new THREE.Group();
     astroGroup.position.set(0, getHeight(0, 0) + 1.2, 0);
 
-    const brassMat = new THREE.MeshStandardMaterial({
-      color: 0xd97706,
-      metalness: 0.9,
-      roughness: 0.2,
-      emissive: 0x78350f,
-      emissiveIntensity: 0.3,
-    });
-    mats.push(brassMat);
+    const brassMat = SharedAssets.getMaterial('archive_brass_mat', () =>
+      new THREE.MeshStandardMaterial({
+        color: 0xd97706,
+        metalness: 0.9,
+        roughness: 0.2,
+        emissive: 0x78350f,
+        emissiveIntensity: 0.3,
+      })
+    );
 
-    const ring1Geo = new THREE.TorusGeometry(5.0, 0.2, 12, 32);
-    const ring2Geo = new THREE.TorusGeometry(3.6, 0.18, 12, 28);
-    const coreGeo = new THREE.IcosahedronGeometry(1.4, 0);
-    geos.push(ring1Geo, ring2Geo, coreGeo);
-
-    const r1 = new THREE.Mesh(ring1Geo, brassMat);
-    const r2 = new THREE.Mesh(ring2Geo, brassMat);
-    const core = new THREE.Mesh(
-      coreGeo,
+    const ring1Geo = SharedAssets.getGeometry('archive_ring1', () => new THREE.TorusGeometry(5.0, 0.2, 10, 28));
+    const ring2Geo = SharedAssets.getGeometry('archive_ring2', () => new THREE.TorusGeometry(3.6, 0.18, 10, 24));
+    const coreGeo = SharedAssets.getGeometry('archive_core', () => new THREE.IcosahedronGeometry(1.4, 0));
+    const coreMat = SharedAssets.getMaterial('archive_core_mat', () =>
       new THREE.MeshStandardMaterial({
         color: 0x38bdf8,
         emissive: 0x0284c7,
         emissiveIntensity: 0.9,
       })
     );
-    mats.push(core.material as THREE.Material);
 
-    astroGroup.add(r1, r2, core);
+    const r1 = new THREE.Mesh(ring1Geo, brassMat);
+    const r2 = new THREE.Mesh(ring2Geo, brassMat);
+    const core = new THREE.Mesh(coreGeo, coreMat);
+
+    astroGroup.add(r1, r2, core, SharedAssets.createGlowSprite(0x38bdf8, 5.0, 0.65));
     worldGroup.add(astroGroup);
+    streamObjects.push({ obj: astroGroup, x: 0, z: 0 });
 
     const astroLight = new THREE.PointLight(0x38bdf8, 2.0, 30);
     astroLight.position.set(0, getHeight(0, 0) + 2.5, 0);
     worldGroup.add(astroLight);
+    managedLights.push(astroLight);
 
     animators.push((dt, total) => {
+      if (!astroGroup.visible) return;
       r1.rotation.x += dt * 0.3;
       r1.rotation.y += dt * 0.4;
       r2.rotation.z += dt * 0.5;
@@ -761,11 +656,11 @@ export class WorldGenerator {
       core.position.y = Math.sin(total * 2.0) * 0.2;
     });
 
-    // 4 Ancient Record Cipher Pedestals
-    const pedGeo = new THREE.BoxGeometry(1.6, 3.2, 1.6);
-    geos.push(pedGeo);
-    const pedMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.8 });
-    mats.push(pedMat);
+    const pedGeo = SharedAssets.getGeometry('archive_pedestal', () => new THREE.BoxGeometry(1.6, 3.2, 1.6));
+    const pedMat = SharedAssets.getMaterial('archive_pedestal_mat', () =>
+      new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.8 })
+    );
+    const glyphGeo = SharedAssets.getGeometry('archive_glyph', () => new THREE.OctahedronGeometry(0.4, 0));
 
     const pedPositions: [number, number][] = [
       [12, 12],
@@ -776,48 +671,30 @@ export class WorldGenerator {
 
     pedPositions.forEach(([px, pz]) => {
       const py = getHeight(px, pz);
-      const ped = new THREE.Mesh(pedGeo, pedMat);
-      ped.position.set(px, py + 1.6, pz);
-      worldGroup.add(ped);
+      const pedGrp = new THREE.Group();
+      pedGrp.position.set(px, py, pz);
 
-      const glyphGeo = new THREE.OctahedronGeometry(0.4, 0);
-      geos.push(glyphGeo);
-      const glyphMat = new THREE.MeshStandardMaterial({
-        color: 0x38bdf8,
-        emissive: 0x0284c7,
-        emissiveIntensity: 0.9,
-      });
-      mats.push(glyphMat);
-      const glyph = new THREE.Mesh(glyphGeo, glyphMat);
-      glyph.position.set(px, py + 3.8, pz);
-      worldGroup.add(glyph);
+      const ped = new THREE.Mesh(pedGeo, pedMat);
+      ped.position.y = 1.6;
+      const glyph = new THREE.Mesh(glyphGeo, coreMat);
+      glyph.position.y = 3.8;
+      pedGrp.add(ped, glyph);
+      worldGroup.add(pedGrp);
+      streamObjects.push({ obj: pedGrp, x: px, z: pz });
     });
   }
 
-  /**
-   * Destination V: The Moonveil Wilds (Bioluminescent Flora & Spores)
-   */
   private static buildMoonveilFeatures(
     worldGroup: THREE.Group,
     getHeight: (x: number, z: number) => number,
-    _isSoftwareGl: boolean,
-    geos: THREE.BufferGeometry[],
-    mats: THREE.Material[],
-    animators: ((dt: number, total: number) => void)[]
+    animators: ((dt: number, total: number) => void)[],
+    streamObjects: { obj: THREE.Object3D; x: number; z: number }[]
   ): void {
-    // Giant Bioluminescent Mushrooms
-    const stalkGeo = new THREE.CylinderGeometry(0.5, 0.8, 6.0, 8);
-    const capGeo = new THREE.ConeGeometry(3.4, 2.0, 8);
-    geos.push(stalkGeo, capGeo);
-
-    const stalkMat = new THREE.MeshStandardMaterial({ color: 0x312e81, roughness: 0.9 });
-    const capMat = new THREE.MeshStandardMaterial({
-      color: 0xc084fc,
-      emissive: 0x9333ea,
-      emissiveIntensity: 0.85,
-      roughness: 0.3,
-    });
-    mats.push(stalkMat, capMat);
+    const stalkGeo = SharedAssets.getGeometry('moonveil_stalk', () => new THREE.CylinderGeometry(0.5, 0.8, 6.0, 8));
+    const capGeo = SharedAssets.getGeometry('moonveil_cap', () => new THREE.ConeGeometry(3.4, 2.0, 8));
+    const stalkMat = SharedAssets.getMaterial('moonveil_stalk_mat', () =>
+      new THREE.MeshStandardMaterial({ color: 0x312e81, roughness: 0.9 })
+    );
 
     const shroomLocations: [number, number, number][] = [
       [-16, 14, 0xc084fc],
@@ -827,7 +704,7 @@ export class WorldGenerator {
       [32, 12, 0xc084fc],
     ];
 
-    const lights: THREE.PointLight[] = [];
+    const glows: THREE.Sprite[] = [];
 
     shroomLocations.forEach(([mx, mz, colorHex]) => {
       const my = getHeight(mx, mz);
@@ -838,88 +715,95 @@ export class WorldGenerator {
       stalk.position.y = 3.0;
       mGroup.add(stalk);
 
-      const customCapMat = capMat.clone();
-      customCapMat.color.setHex(colorHex);
-      customCapMat.emissive.setHex(colorHex);
-      mats.push(customCapMat);
+      const capMat = SharedAssets.getMaterial(`moonveil_cap_${colorHex}`, () =>
+        new THREE.MeshStandardMaterial({
+          color: colorHex,
+          emissive: colorHex,
+          emissiveIntensity: 0.85,
+          roughness: 0.3,
+        })
+      );
 
-      const cap = new THREE.Mesh(capGeo, customCapMat);
+      const cap = new THREE.Mesh(capGeo, capMat);
       cap.position.y = 6.2;
       mGroup.add(cap);
 
-      const mLight = new THREE.PointLight(colorHex, 1.4, 16);
-      mLight.position.y = 6.5;
-      mGroup.add(mLight);
-      lights.push(mLight);
+      const glow = SharedAssets.createGlowSprite(colorHex, 5.5, 0.68);
+      glow.position.y = 6.5;
+      mGroup.add(glow);
+      glows.push(glow);
 
       worldGroup.add(mGroup);
+      streamObjects.push({ obj: mGroup, x: mx, z: mz });
     });
 
     animators.push((_dt, total) => {
-      lights.forEach((l, idx) => {
-        l.intensity = 1.2 + Math.sin(total * 2.5 + idx) * 0.4;
+      glows.forEach((g, idx) => {
+        if (!g.parent?.visible) return;
+        const s = 5.2 + Math.sin(total * 2.5 + idx) * 0.6;
+        g.scale.set(s, s, 1);
       });
     });
   }
 
-  /**
-   * Destination VI: The Rift Frontier (Fractured Void Tears)
-   */
   private static buildRiftFeatures(
     worldGroup: THREE.Group,
     getHeight: (x: number, z: number) => number,
-    _isSoftwareGl: boolean,
-    geos: THREE.BufferGeometry[],
-    mats: THREE.Material[],
-    animators: ((dt: number, total: number) => void)[]
+    animators: ((dt: number, total: number) => void)[],
+    managedLights: THREE.PointLight[],
+    streamObjects: { obj: THREE.Object3D; x: number; z: number }[]
   ): void {
-    // Hovering void anomaly singularity at center
     const singGroup = new THREE.Group();
-    singGroup.position.set(0, getHeight(0, 0) + 5.0, 0);
+    const baseY = getHeight(0, 0) + 5.0;
+    singGroup.position.set(0, baseY, 0);
 
-    const voidCoreGeo = new THREE.IcosahedronGeometry(2.2, 1);
-    const voidRingGeo = new THREE.TorusGeometry(4.2, 0.25, 8, 32);
-    geos.push(voidCoreGeo, voidRingGeo);
-
-    const voidMat = new THREE.MeshStandardMaterial({
-      color: 0x09090b,
-      roughness: 0.1,
-      metalness: 0.9,
-    });
-    const glowMat = new THREE.MeshBasicMaterial({
-      color: 0xa855f7,
-      wireframe: true,
-    });
-    mats.push(voidMat, glowMat);
+    const voidCoreGeo = SharedAssets.getGeometry('rift_void_core', () => new THREE.IcosahedronGeometry(2.2, 1));
+    const voidRingGeo = SharedAssets.getGeometry('rift_void_ring', () => new THREE.TorusGeometry(4.2, 0.25, 8, 28));
+    const voidMat = SharedAssets.getMaterial('rift_void_mat', () =>
+      new THREE.MeshStandardMaterial({
+        color: 0x09090b,
+        roughness: 0.1,
+        metalness: 0.9,
+      })
+    );
+    const glowMat = SharedAssets.getMaterial('rift_wire_mat', () =>
+      new THREE.MeshBasicMaterial({
+        color: 0xa855f7,
+        wireframe: true,
+      })
+    );
 
     const core = new THREE.Mesh(voidCoreGeo, voidMat);
     const wire = new THREE.Mesh(voidCoreGeo, glowMat);
     wire.scale.set(1.15, 1.15, 1.15);
     const ring = new THREE.Mesh(voidRingGeo, glowMat);
 
-    singGroup.add(core, wire, ring);
+    singGroup.add(core, wire, ring, SharedAssets.createGlowSprite(0xa855f7, 7.5, 0.72));
     worldGroup.add(singGroup);
+    streamObjects.push({ obj: singGroup, x: 0, z: 0 });
 
     const voidLight = new THREE.PointLight(0xa855f7, 2.5, 35);
-    voidLight.position.set(0, getHeight(0, 0) + 5.0, 0);
+    voidLight.position.set(0, baseY, 0);
     worldGroup.add(voidLight);
+    managedLights.push(voidLight);
 
     animators.push((dt, total) => {
       singGroup.rotation.y += dt * 0.8;
       singGroup.rotation.z += dt * 0.4;
-      singGroup.position.y = getHeight(0, 0) + 5.0 + Math.sin(total * 2.0) * 0.4;
-      voidLight.intensity = 2.2 + Math.sin(total * 3.5) * 0.6;
+      singGroup.position.y = baseY + Math.sin(total * 2.0) * 0.4;
+      if (voidLight.visible) {
+        voidLight.intensity = 2.2 + Math.sin(total * 3.5) * 0.6;
+      }
     });
 
-    // Floating tilted obsidian monolith chunks
-    const chunkGeo = new THREE.BoxGeometry(4.5, 1.2, 4.5);
-    geos.push(chunkGeo);
-    const chunkMat = new THREE.MeshStandardMaterial({
-      color: 0x18181b,
-      roughness: 0.3,
-      metalness: 0.8,
-    });
-    mats.push(chunkMat);
+    const chunkGeo = SharedAssets.getGeometry('rift_obsidian_chunk', () => new THREE.BoxGeometry(4.5, 1.2, 4.5));
+    const chunkMat = SharedAssets.getMaterial('rift_obsidian_mat', () =>
+      new THREE.MeshStandardMaterial({
+        color: 0x18181b,
+        roughness: 0.3,
+        metalness: 0.8,
+      })
+    );
 
     const chunkLocations: [number, number, number, number][] = [
       [-18, 12, 10, 0.3],
@@ -935,6 +819,7 @@ export class WorldGenerator {
       chunk.rotation.z = tilt;
       chunk.rotation.x = tilt * 0.5;
       worldGroup.add(chunk);
+      streamObjects.push({ obj: chunk, x: cx, z: cz });
     });
   }
 }

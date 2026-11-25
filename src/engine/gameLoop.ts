@@ -24,6 +24,7 @@ import {
   WeatherType,
   Checkpoint,
   GameSettings,
+  EngineDiagnostics,
 } from '../types/game';
 import { RenderPipeline, RendererBundle } from './renderer';
 import { WorldGenerator, WorldBundle } from './world';
@@ -51,6 +52,9 @@ import { getContextualDialogue, DialogueContext } from '../data/npcDialogue';
 import { PortalManager } from '../systems/portalManager';
 import { PortalDefinition, checkPortalUnlock, PortalUnlockCheck } from '../data/portals';
 import { REGIONS, DIMENSIONS, CHECKPOINTS } from '../data/regions';
+import { WorldStateStore } from '../services/worldStateStore';
+import { ChunkManager } from './chunkManager';
+import { PerformanceGovernor, QualityConfig } from './performanceGovernor';
 
 export interface EngineUiCallbacks {
   onStatsUpdate: (stats: {
@@ -89,14 +93,7 @@ export interface EngineUiCallbacks {
   onWeatherUpdate?: (weather: string) => void;
   onBossStateUpdate?: (boss: ActiveBossState | null) => void;
   onFpsUpdate?: (fps: number) => void;
-  onDiagnosticsUpdate?: (diag: {
-    fps: number;
-    frameTimeMs: number;
-    drawCalls: number;
-    triangles: number;
-    geometries: number;
-    textures: number;
-  }) => void;
+  onDiagnosticsUpdate?: (diag: EngineDiagnostics) => void;
   onDiscoveriesUpdate?: (discoveries: string[]) => void;
   onInspectPortal?: (portal: PortalDefinition, check: PortalUnlockCheck) => void;
   onStartDimensionTransition?: (destinationRegionId: string) => void;
@@ -136,12 +133,41 @@ export class GameEngine {
   private clock: THREE.Clock = new THREE.Clock();
   private totalSimulationTime: number = 0;
 
-  // Diagnostics, Performance & Reliability
+  // Diagnostics, Performance & Streaming
   private frameCount: number = 0;
   private fpsTimer: number = 0;
   private rollingFrameTimeMs: number = 16.6;
   private isPageHidden: boolean = false;
   private uiThrottleTimer: number = 0;
+  private slowSimTimer: number = 0;
+
+  private worldStateStore: WorldStateStore;
+  private chunkManager: ChunkManager | null = null;
+  private governor: PerformanceGovernor | null = null;
+  private currentQualityConfig: QualityConfig | null = null;
+
+  private readonly _titleCenter = new THREE.Vector3(0, 5, 0);
+  private readonly isChunkPosActive = (x: number, z: number): boolean =>
+    this.chunkManager ? this.chunkManager.isPositionActive(x, z) : true;
+  private readonly isChunkPosVisible = (x: number, z: number): boolean =>
+    this.chunkManager ? this.chunkManager.isPositionVisible(x, z) : true;
+
+  // Pre-allocated observer targets (avoids per-frame Vector3/array allocations)
+  private observerTargets: ObserverTarget[] = [];
+  private activeObserverList: ObserverTarget[] = [];
+  private crimsonWardenObserver: ObserverTarget | null = null;
+
+  // Cached last emitted HUD values to avoid redundant React state updates
+  private lastUiHealth = -1;
+  private lastUiMaxHealth = -1;
+  private lastUiStamina = -1;
+  private lastUiMaxStamina = -1;
+  private lastUiLevel = -1;
+  private lastUiXp = -1;
+  private lastUiClock = '';
+  private lastUiPhase = '';
+  private lastUiTransitionSec = -1;
+  private lastUiWeather = '';
 
   // Active interaction targets
   private currentInteractionPrompt: string | null = null;
@@ -157,6 +183,7 @@ export class GameEngine {
     this.container = container;
     this.uiCallbacks = uiCallbacks;
     this.activeSave = initialSave;
+    this.worldStateStore = new WorldStateStore(initialSave);
 
     // Reliability: Visibility change listener to throttle/pause when tab hidden
     document.addEventListener('visibilitychange', this.handleVisibilityChange);
@@ -239,7 +266,7 @@ export class GameEngine {
         throw new Error('WebGL is not supported by your browser or hardware.');
       }
 
-      // 2. Initialize Three.js pipeline with device presets & reliability hooks
+      // 2. Initialize Three.js pipeline with device presets & Adaptive Quality Governor
       onProgress?.('Compiling Three.js render pipeline...', 35);
       this.bundle = RenderPipeline.init(
         this.container,
@@ -247,13 +274,33 @@ export class GameEngine {
         this.handleContextLost,
         this.handleContextRestored
       );
+      this.governor = new PerformanceGovernor(
+        this.activeSave.settings,
+        this.bundle.isSoftwareGl,
+        this.bundle.isMobile
+      );
+      this.currentQualityConfig = this.governor.getConfig(this.activeSave.settings);
 
-      // 3. Build current destination world
+      // 3. Build current destination world & spatial chunk streamer
       onProgress?.('Synthesizing floating archipelago & terrain...', 60);
       const maxAnisotropy = this.bundle.isSoftwareGl ? 1 : this.bundle.renderer.capabilities.getMaxAnisotropy();
       const currentRegion = this.activeSave.regionId || 'verdant_reach';
       this.world = WorldGenerator.generate(currentRegion, maxAnisotropy, this.bundle.isSoftwareGl);
       this.bundle.scene.add(this.world.group);
+
+      this.chunkManager = new ChunkManager(
+        this.bundle.scene,
+        currentRegion,
+        this.worldStateStore.worldSeed,
+        this.world.getTerrainHeight,
+        maxAnisotropy,
+        this.bundle.isSoftwareGl
+      );
+      this.chunkManager.bootstrapAround(
+        this.activeSave.playerPosition[0],
+        this.activeSave.playerPosition[2],
+        this.currentQualityConfig
+      );
 
       // 4. Build Player Explorer
       onProgress?.('Populating flora, wildlife & sanctuaries...', 80);
@@ -274,21 +321,23 @@ export class GameEngine {
 
       // 6. Build World Entities (NPCs, Wisps, Harvestable nodes)
       this.entities = new EntityManager(this.bundle.scene, this.bundle.isSoftwareGl);
-      this.entities.populate(this.world.getTerrainHeight);
+      this.entities.populate(this.world.getTerrainHeight, this.worldStateStore, currentRegion);
 
       // 6B. Build World Structures (Beacons, Ruined Towers, Hidden Chambers, Settlements, Camps, Bridges, Gates, Deposits)
       this.structures = new StructuresManager(this.bundle.scene, this.bundle.isSoftwareGl);
-      this.structures.buildAll(this.world.getTerrainHeight, this.activeSave);
+      this.structures.buildAll(this.world.getTerrainHeight, this.activeSave, currentRegion, this.worldStateStore);
 
-      // 10. Procedural Flora & Gathering Nodes (Prompt 7)
+      // 10. Procedural Flora & Gathering Nodes
       this.flora = new FloraManager(this.bundle.scene, this.bundle.isSoftwareGl);
       this.flora.populate(
-        (x, z) => this.world!.getTerrainHeight(x, z),
+        this.world.getTerrainHeight,
         this.inventory,
-        this.activeSave
+        this.activeSave,
+        this.worldStateStore,
+        currentRegion
       );
 
-      // 11. Wildlife Simulation (Prompt 9: 8 original species)
+      // 11. Wildlife Simulation (deterministic IDs + delta persistence)
       this.wildlife = new WildlifeManager(
         this.bundle.scene,
         this.world.getTerrainHeight,
@@ -303,11 +352,11 @@ export class GameEngine {
           }
         }
       );
-      this.wildlife.populate();
+      this.wildlife.populate(currentRegion, this.worldStateStore, this.currentQualityConfig.entityCap);
 
       // 12. Build Dimension Portals (Outbound gateways & return conduits)
       this.portals = new PortalManager(this.bundle.scene, this.bundle.isSoftwareGl);
-      this.portals.populateForRegion(currentRegion, (x, z) => this.world!.getTerrainHeight(x, z));
+      this.portals.populateForRegion(currentRegion, this.world.getTerrainHeight);
 
       // Equipment passive perks listener
       this.inventory.subscribe((_slots, _wallet, _hotbar, _equipped) => {
@@ -337,7 +386,9 @@ export class GameEngine {
         this.inventory,
         this.quests,
         this.checkpoints,
-        this.structures
+        this.structures,
+        this.worldStateStore,
+        currentRegion
       );
       this.interactions.onPromptChange = (prompt) => {
         this.currentInteractionPrompt = prompt;
@@ -357,13 +408,15 @@ export class GameEngine {
         }
       };
 
-      // 7. Initialize Day / Night system (20-min cycle: 13m day, 7m night)
+      // 7. Initialize Day / Night system (reuses RenderPipeline lights for single shadow map)
       this.dayNight = new DayNightSystem(
         this.bundle.scene,
         this.activeSave.worldTime.cycleTime,
         this.activeSave.worldTime.dayCount,
         this.activeSave.redMoon,
-        this.activeSave.settings.dayDurationMinutes || 20
+        this.activeSave.settings.dayDurationMinutes || 20,
+        this.bundle.keyLight,
+        this.bundle.hemiLight
       );
 
       // Hook Red Moon triggers
@@ -397,7 +450,8 @@ export class GameEngine {
         },
         (damage) => {
           this.damagePlayer(damage);
-        }
+        },
+        currentRegion
       );
 
       // 10. Initialize 5 Hostile Enemy Archetypes
@@ -407,7 +461,9 @@ export class GameEngine {
         this.inventory,
         this.quests,
         this.achievements,
-        this.bundle.isSoftwareGl
+        this.bundle.isSoftwareGl,
+        currentRegion,
+        this.worldStateStore
       );
 
       // 10B. Crimson Warden encounter
@@ -430,9 +486,13 @@ export class GameEngine {
         this.activeSave.redMoon.wardenDefeated,
         this.bundle.isSoftwareGl
       );
+      this.crimsonWarden.setRegionActive(currentRegion === 'verdant_reach', this.world.getTerrainHeight);
 
-      // 10. Restore collected relics state from save
+      // 10. Restore collected relics state from save & apply quality/streaming
       this.restoreRelicsState();
+      this.rebuildObserverTargets();
+      this.applyResolvedQualityConfig();
+      this.syncStreamingVisibility();
 
       // 11. Initialize audio system
       AudioService.init();
@@ -508,15 +568,79 @@ export class GameEngine {
     this.applySettings(newSettings);
   }
 
+  public isSoftwareGl(): boolean {
+    return Boolean(this.bundle?.isSoftwareGl);
+  }
+
+  private rebuildObserverTargets(): void {
+    if (!this.world) return;
+    this.observerTargets = [
+      {
+        name: 'Surveyor Kaelen',
+        position: new THREE.Vector3(6, this.world.getTerrainHeight(6, 5), 5),
+        eyeHeight: 1.4,
+      },
+      {
+        name: 'Ancient Monolith',
+        position: new THREE.Vector3(0, this.world.getTerrainHeight(0, 0), 0),
+        eyeHeight: 5.4,
+      },
+      {
+        name: 'Luminescent Wisp',
+        position: new THREE.Vector3(14, this.world.getTerrainHeight(14, -8) + 1.8, -8),
+        eyeHeight: 0.5,
+      },
+    ];
+    this.crimsonWardenObserver = {
+      name: 'Crimson Warden',
+      position: new THREE.Vector3(-52, this.world.getTerrainHeight(-52, -45), -45),
+      eyeHeight: 3.8,
+    };
+  }
+
+  private applyResolvedQualityConfig(): void {
+    if (!this.bundle || !this.container || !this.governor) return;
+    const config = this.governor.getConfig(this.activeSave.settings);
+    this.currentQualityConfig = config;
+
+    RenderPipeline.applyQualityConfig(
+      this.bundle,
+      this.activeSave.settings,
+      config,
+      this.container.clientWidth,
+      this.container.clientHeight
+    );
+    this.weather.setParticleLimit(config.particleLimit);
+    this.player?.setQualityState(config.tier, config.shadows);
+    this.world?.setPointLightBudget(config.tier);
+    this.structures?.setQualityTier(config.tier);
+    this.wildlife?.setEntityCap(config.entityCap);
+    this.combatEnemies?.setEntityCap(config.entityCap);
+  }
+
+  private syncStreamingVisibility(): void {
+    this.world?.syncChunkVisibility(this.isChunkPosVisible);
+    this.portals?.syncStreaming(this.isChunkPosVisible);
+    this.structures?.syncStreaming(this.isChunkPosVisible);
+    this.flora?.syncStreaming(this.isChunkPosActive);
+    this.entities?.syncStreaming(this.isChunkPosActive, this.isChunkPosVisible);
+    this.wildlife?.syncStreaming(this.isChunkPosVisible, this.isChunkPosActive);
+    this.combatEnemies?.syncStreaming(this.isChunkPosVisible);
+    this.bossManager?.syncStreaming(this.isChunkPosVisible);
+  }
+
   /**
    * Seamless / atmospheric dimension and destination transition
-   * Cleanly disposes inactive worlds, loads destination world, updates environment, and sets gravity.
+   * Persists region state, cleanly disposes inactive worlds/chunks, loads destination world & chunks, updates environment, and sets gravity.
    */
   public async switchDestination(destinationRegionId: string, targetCheckpointId?: string): Promise<boolean> {
     if (!this.bundle || !this.player) return false;
 
     const destRegion = REGIONS[destinationRegionId] || REGIONS.verdant_reach;
     const destDim = DIMENSIONS[destRegion.dimensionId] || DIMENSIONS.the_living_reach;
+
+    // 0. Flush outgoing region state into WorldStateStore & persist before tearing down
+    this.persistSave();
 
     // 1. Notify UI to display atmospheric warp overlay
     this.uiCallbacks.onStartDimensionTransition?.(destinationRegionId);
@@ -525,33 +649,50 @@ export class GameEngine {
     AudioService.playGatewayTeleport();
     this.cameraManager?.addShake(0.8);
 
-    // 2. Cleanly dispose active world and scene objects (no background simulation of inactive worlds)
+    // 2. Cleanly dispose active world, chunk streamer, and all scene managers
+    if (this.chunkManager) {
+      this.chunkManager.dispose();
+      this.chunkManager = null;
+    }
     if (this.world) {
       this.bundle.scene.remove(this.world.group);
       this.world.dispose();
       this.world = null;
     }
 
-    // Cleanly clear entities, flora, wildlife, and portal meshes
+    this.structures?.clear();
     this.flora?.clear();
+    this.entities?.clear();
     this.wildlife?.clear();
     this.combatEnemies?.clear();
+    this.bossManager?.clear();
     this.portals?.clear();
+    this.crimsonWarden?.setRegionActive(false);
 
     // 3. Update environment lighting & fog for destination
     if (this.bundle.scene.fog && 'color' in this.bundle.scene.fog) {
       (this.bundle.scene.fog as THREE.FogExp2).color.setHex(destRegion.fogColor);
-      (this.bundle.scene.fog as THREE.FogExp2).density = destRegion.fogDensity;
+      (this.bundle.scene.fog as THREE.FogExp2).density =
+        this.currentQualityConfig?.fogDensity ?? destRegion.fogDensity;
     }
     this.bundle.renderer.setClearColor(destDim.skyVoidColor, 1);
 
     // 4. Update player physics for destination gravity
     this.player.gravityModifier = destRegion.gravityModifier ?? destDim.gravityModifier;
 
-    // 5. Generate destination world
+    // 5. Generate destination world & chunk streamer
     const maxAnisotropy = this.bundle.isSoftwareGl ? 1 : this.bundle.renderer.capabilities.getMaxAnisotropy();
     this.world = WorldGenerator.generate(destinationRegionId, maxAnisotropy, this.bundle.isSoftwareGl);
     this.bundle.scene.add(this.world.group);
+
+    this.chunkManager = new ChunkManager(
+      this.bundle.scene,
+      destinationRegionId,
+      this.worldStateStore.worldSeed,
+      this.world.getTerrainHeight,
+      maxAnisotropy,
+      this.bundle.isSoftwareGl
+    );
 
     // 6. Set player position
     let spawnPos: [number, number, number] = [...destRegion.spawnPoint];
@@ -566,20 +707,34 @@ export class GameEngine {
     this.player.group.position.set(spawnPos[0], spawnPos[1], spawnPos[2]);
     this.player.velocity.set(0, 0, 0);
 
-    // 7. Populate portals for this destination (outbound gateways or return conduits)
-    if (this.portals) {
-      this.portals.populateForRegion(destinationRegionId, (x, z) => this.world!.getTerrainHeight(x, z));
+    const qualityConfig =
+      this.currentQualityConfig ||
+      this.governor?.getConfig(this.activeSave.settings);
+    if (qualityConfig) {
+      this.chunkManager.bootstrapAround(spawnPos[0], spawnPos[2], qualityConfig);
     }
 
-    // 8. Re-populate entities, flora, wildlife for this region
+    // 7. Populate portals & region systems with WorldStateStore persistence
+    const entityCap = qualityConfig?.entityCap ?? 24;
+    this.portals?.populateForRegion(destinationRegionId, this.world.getTerrainHeight);
+    this.structures?.buildAll(this.world.getTerrainHeight, this.activeSave, destinationRegionId, this.worldStateStore);
+    this.flora?.populate(this.world.getTerrainHeight, this.inventory, this.activeSave, this.worldStateStore, destinationRegionId);
+    this.entities?.populate(this.world.getTerrainHeight, this.worldStateStore, destinationRegionId);
+    this.wildlife?.populate(destinationRegionId, this.worldStateStore, entityCap);
+    this.combatEnemies?.populate(destinationRegionId, this.worldStateStore, entityCap);
+    this.bossManager?.populateForRegion(destinationRegionId, this.world.getTerrainHeight);
+    this.crimsonWarden?.setRegionActive(destinationRegionId === 'verdant_reach', this.world.getTerrainHeight);
+    this.interactions?.setRegion(destinationRegionId);
+
     if (destinationRegionId === 'verdant_reach') {
-      if (this.structures) {
-        this.structures.buildAll(this.world.getTerrainHeight, this.activeSave);
-      }
-      this.flora?.populate(this.world.getTerrainHeight, this.inventory, this.activeSave);
-      this.wildlife?.populate();
       this.restoreRelicsState();
+    } else {
+      this.notifyRelicUpdate();
     }
+
+    this.rebuildObserverTargets();
+    this.applyResolvedQualityConfig();
+    this.syncStreamingVisibility();
 
     // 9. Update & persist save
     this.activeSave.dimensionId = destRegion.dimensionId;
@@ -743,7 +898,12 @@ export class GameEngine {
       const frameDelta = tEnd - tStart;
       this.rollingFrameTimeMs = this.rollingFrameTimeMs * 0.85 + frameDelta * 0.15;
 
-      // FPS counter & live diagnostics reporting
+      // Feed Adaptive Quality Governor (~2s window with hysteresis)
+      if (this.governor?.recordFrame(frameDelta, dt, this.activeSave.settings)) {
+        this.applyResolvedQualityConfig();
+      }
+
+      // FPS counter & live diagnostics reporting (0.5s cadence)
       this.frameCount++;
       this.fpsTimer += dt;
       if (this.fpsTimer >= 0.5) {
@@ -751,6 +911,11 @@ export class GameEngine {
         this.uiCallbacks.onFpsUpdate?.(liveFps);
         if (this.uiCallbacks.onDiagnosticsUpdate && this.bundle) {
           const diag = RenderPipeline.getDiagnostics(this.bundle.renderer);
+          const counts = this.chunkManager?.getCounts();
+          const entityCount =
+            (this.entities?.getVisibleCount() || 0) +
+            (this.wildlife?.getVisibleCount() || 0) +
+            (this.combatEnemies?.getVisibleCount() || 0);
           this.uiCallbacks.onDiagnosticsUpdate({
             fps: liveFps,
             frameTimeMs: Math.round(this.rollingFrameTimeMs * 10) / 10,
@@ -758,6 +923,12 @@ export class GameEngine {
             triangles: diag.triangles,
             geometries: diag.geometries,
             textures: diag.textures,
+            activeChunks: counts?.active ?? 0,
+            nearChunks: counts?.near ?? 0,
+            unloadedChunks: counts?.unloaded ?? 0,
+            entityCount,
+            activeQualityTier: this.currentQualityConfig?.tier,
+            isAutoQuality: this.currentQualityConfig?.isAuto,
           });
         }
         this.frameCount = 0;
@@ -813,96 +984,147 @@ export class GameEngine {
 
     this.totalSimulationTime += dt;
 
-    // 1. Day/Night progression (20-minute cycle with exact countdown)
-    this.dayNight.update(dt);
+    // 0. Update chunk streaming & frustum culling before rendering/visibility checks
+    if (this.chunkManager && this.currentQualityConfig) {
+      const focusPos = this.mode === 'TITLE' ? this._titleCenter : this.player.group.position;
+      this.chunkManager.update(focusPos, this.bundle.camera, this.currentQualityConfig);
+      this.syncStreamingVisibility();
+    }
+
+    // 10 Hz slow simulation accumulator for non-player systems (AI, wildlife, flora, atmosphere, interactions)
+    this.slowSimTimer += dt;
+    const isSlowTick = this.slowSimTimer >= 0.1;
+    const slowDt = isSlowTick ? Math.min(this.slowSimTimer, 0.15) : 0;
+    if (isSlowTick) {
+      this.slowSimTimer = 0;
+    }
+
+    // 1. Day/Night progression (clock ticks smoothly; atmosphere colors update at 10 Hz)
+    this.dayNight.update(dt, isSlowTick);
+
+    if (isSlowTick) {
       if (this.flora) {
-        const isNight = this.dayNight.state.phaseName === 'NIGHT' || this.dayNight.state.phaseName === 'RED_MOON';
-        const isRedMoon = this.dayNight.state.isRedMoon;
-        this.flora.update(dt, this.totalSimulationTime, isNight, isRedMoon);
+        const isNight =
+          this.dayNight.state.phaseName === 'NIGHT' || this.dayNight.state.phaseName === 'RED_MOON';
+        this.flora.update(slowDt, this.totalSimulationTime, isNight, this.dayNight.state.isRedMoon);
       }
-    // UI State updates throttled to 10Hz (every 100ms) to eliminate React re-render overhead
-    this.uiThrottleTimer += dt;
-    if (this.uiThrottleTimer >= 0.1) {
+
+      // Diffed HUD updates at 10 Hz to avoid redundant React re-renders
       this.uiThrottleTimer = 0;
-      this.uiCallbacks.onTimeUpdate({
-        phase: this.dayNight.state.phaseName,
-        cycleTime: this.dayNight.state.cycleTime,
-        dayCount: this.dayNight.state.dayCount,
-        isRedMoon: this.dayNight.state.isRedMoon,
-        clockTime: this.dayNight.state.clockTime,
-        nextTransitionLabel: this.dayNight.state.nextTransitionLabel,
-        nextTransitionSeconds: this.dayNight.state.nextTransitionSeconds,
-      });
-      this.uiCallbacks.onWeatherUpdate?.(this.weather.state.currentWeather);
+      const ds = this.dayNight.state;
+      if (
+        ds.clockTime !== this.lastUiClock ||
+        ds.phaseName !== this.lastUiPhase ||
+        ds.nextTransitionSeconds !== this.lastUiTransitionSec
+      ) {
+        this.lastUiClock = ds.clockTime;
+        this.lastUiPhase = ds.phaseName;
+        this.lastUiTransitionSec = ds.nextTransitionSeconds;
+        this.uiCallbacks.onTimeUpdate({
+          phase: ds.phaseName,
+          cycleTime: ds.cycleTime,
+          dayCount: ds.dayCount,
+          isRedMoon: ds.isRedMoon,
+          clockTime: ds.clockTime,
+          nextTransitionLabel: ds.nextTransitionLabel,
+          nextTransitionSeconds: ds.nextTransitionSeconds,
+        });
+      }
+
+      if (this.weather.state.currentWeather !== this.lastUiWeather) {
+        this.lastUiWeather = this.weather.state.currentWeather;
+        this.uiCallbacks.onWeatherUpdate?.(this.weather.state.currentWeather);
+      }
 
       if (this.mode === 'PLAYING') {
-        this.uiCallbacks.onStatsUpdate({
-          health: Math.round(this.player.stats.health),
-          maxHealth: this.player.stats.maxHealth,
-          stamina: Math.round(this.player.stats.stamina),
-          maxStamina: this.player.stats.maxStamina,
-          level: this.player.stats.level,
-          experience: this.player.stats.experience,
-          experienceToNext: this.player.stats.experienceToNext,
-        });
+        const h = Math.round(this.player.stats.health);
+        const mh = this.player.stats.maxHealth;
+        const s = Math.round(this.player.stats.stamina);
+        const ms = this.player.stats.maxStamina;
+        const lvl = this.player.stats.level;
+        const xp = this.player.stats.experience;
+        if (
+          h !== this.lastUiHealth ||
+          mh !== this.lastUiMaxHealth ||
+          s !== this.lastUiStamina ||
+          ms !== this.lastUiMaxStamina ||
+          lvl !== this.lastUiLevel ||
+          xp !== this.lastUiXp
+        ) {
+          this.lastUiHealth = h;
+          this.lastUiMaxHealth = mh;
+          this.lastUiStamina = s;
+          this.lastUiMaxStamina = ms;
+          this.lastUiLevel = lvl;
+          this.lastUiXp = xp;
+          this.uiCallbacks.onStatsUpdate({
+            health: h,
+            maxHealth: mh,
+            stamina: s,
+            maxStamina: ms,
+            level: lvl,
+            experience: xp,
+            experienceToNext: this.player.stats.experienceToNext,
+          });
+        }
       }
     }
 
-    // 2. Weather simulation with particles and environmental fog
+    // 2. Weather simulation with internally throttled GPU buffer updates & quality-scaled fog
     this.weather.update(
       dt,
       this.bundle.scene,
       this.dayNight.state.isRedMoon,
-      this.player.group.position
+      this.player.group.position,
+      this.currentQualityConfig?.fogDensity
     );
 
     // Apply weather modifiers to player stamina regeneration
     this.player.staminaRegenModifier = this.weather.staminaRegenModifier;
 
-    // 3. World animation (beacon rings, hovering crystals, flowing river)
+    // 3. World, structures, and portals visual animation (lightweight transforms)
     this.world.update(dt);
-
-    // 3B. Structures animation (astrolabe rings, gates, crystals, dimensional gateway vortex)
     this.structures?.update(dt, this.totalSimulationTime);
-
-    // 3C. Dimension Portals animation (vortex pulsation, concentric rings, dynamic lights)
     this.portals?.update(dt, this.totalSimulationTime);
 
-    // 4. Entity updates (NPCs, schedules, trading creatures, wisps)
-    this.entities?.update(dt, this.totalSimulationTime, this.dayNight.state, this.activeSave.discoveries);
-
-    // 4B. Wildlife simulation (8 original species)
-    this.wildlife?.update(dt, this.totalSimulationTime, this.player.group.position, {
-      isRedMoon: Boolean(this.dayNight.state.isRedMoon),
-    });
-
-    // 5. Boss Manager (6 distinct world bosses with phases & telegraphed attacks)
-    this.bossManager?.update(dt, this.player.group.position, Boolean(this.dayNight.state.isRedMoon));
-
-    // 5B. Combat Enemies (5 distinct hostile archetypes across island biomes)
-    this.combatEnemies?.update(dt, this.player.group.position, (dmg) => this.damagePlayer(dmg));
-
-    // 5C. Crimson Warden Boss simulation
-    if (this.crimsonWarden) {
-      this.crimsonWarden.update(
-        dt,
+    // 4. Throttled AI, Wildlife, NPCs, Bosses & Hostile Combat (10 Hz)
+    if (isSlowTick) {
+      this.entities?.update(
+        slowDt,
         this.totalSimulationTime,
-        this.player.group.position,
-        this.dayNight.state.isRedMoon,
-        this.world.getTerrainHeight
+        this.dayNight.state,
+        this.activeSave.discoveries,
+        this.player.group.position
       );
+
+      this.wildlife?.update(slowDt, this.totalSimulationTime, this.player.group.position, {
+        isRedMoon: Boolean(this.dayNight.state.isRedMoon),
+      });
+
+      this.bossManager?.update(slowDt, this.player.group.position, Boolean(this.dayNight.state.isRedMoon));
+      this.combatEnemies?.update(slowDt, this.player.group.position, (dmg) => this.damagePlayer(dmg));
+
+      if (this.crimsonWarden) {
+        this.crimsonWarden.update(
+          slowDt,
+          this.totalSimulationTime,
+          this.player.group.position,
+          this.dayNight.state.isRedMoon,
+          this.world.getTerrainHeight
+        );
+      }
     }
 
     if (this.mode === 'TITLE') {
       // Cinematic camera orbit around The Verdant Reach & Ancient Beacon
-      const t = Date.now() * 0.0002;
+      const t = this.totalSimulationTime * 0.2;
       const camRadius = 38;
       this.bundle.camera.position.x = Math.sin(t) * camRadius;
       this.bundle.camera.position.z = Math.cos(t) * camRadius;
       this.bundle.camera.position.y = 16 + Math.sin(t * 1.5) * 4;
       this.bundle.camera.lookAt(0, 5, 0);
     } else if (this.mode === 'PLAYING') {
-      // 1. Player physics, colliders & movement
+      // 1. Player physics, colliders & movement (full frame rate)
       const activeCp = this.checkpoints.getActiveCheckpoint();
       const colliders = this.structures ? this.structures.colliders : [];
 
@@ -916,20 +1138,14 @@ export class GameEngine {
         () => this.handlePlayerDefeat()
       );
 
-      // 2. Camera Manager update with Observer Perspective support
-      const observers: ObserverTarget[] = [
-        { name: 'Surveyor Kaelen', position: new THREE.Vector3(6, this.world.getTerrainHeight(6, 5), 5), eyeHeight: 1.4 },
-        { name: 'Ancient Monolith', position: new THREE.Vector3(0, this.world.getTerrainHeight(0, 0), 0), eyeHeight: 5.4 },
-        { name: 'Luminescent Wisp', position: new THREE.Vector3(14, this.world.getTerrainHeight(14, -8) + 1.8, -8), eyeHeight: 0.5 },
-      ];
-
-      // If boss is active, it can serve as a dramatic observer!
-      if (this.crimsonWarden?.state.active) {
-        observers.unshift({
-          name: 'Crimson Warden',
-          position: this.crimsonWarden.getBossPosition(),
-          eyeHeight: 3.8,
-        });
+      // 2. Camera Manager update with pre-allocated Observer targets
+      this.activeObserverList.length = 0;
+      if (this.crimsonWarden?.state.active && this.crimsonWardenObserver) {
+        this.crimsonWardenObserver.position.copy(this.crimsonWarden.getBossPosition());
+        this.activeObserverList.push(this.crimsonWardenObserver);
+      }
+      for (let i = 0; i < this.observerTargets.length; i++) {
+        this.activeObserverList.push(this.observerTargets[i]);
       }
 
       this.cameraManager.update(
@@ -940,15 +1156,17 @@ export class GameEngine {
         this.input.state.lookDeltaY,
         this.world.getTerrainHeight,
         this.player.group,
-        observers
+        this.activeObserverList
       );
 
       // Reset look deltas after consumption
       this.input.state.lookDeltaX = 0;
       this.input.state.lookDeltaY = 0;
 
-      // 3. Check proximity interactions and checkpoints
-      this.checkInteractions();
+      // 3. Check proximity interactions and checkpoints at 10 Hz
+      if (isSlowTick) {
+        this.checkInteractions();
+      }
     }
   }
 
@@ -1189,6 +1407,12 @@ export class GameEngine {
         if (!this.activeSave.collectedShardIds.includes(this.nearbyShard.id)) {
           this.activeSave.collectedShardIds.push(this.nearbyShard.id);
         }
+        this.worldStateStore.markShardCollected(
+          this.activeSave.regionId || 'verdant_reach',
+          entry.mesh.position.x,
+          entry.mesh.position.z,
+          this.nearbyShard.id
+        );
 
         // Add to inventory
         this.inventory.addItem(this.nearbyShard.id, 1, false);
@@ -1270,6 +1494,12 @@ export class GameEngine {
       if (q3Done || collectedCount >= this.world.beacon.data.requiredShards) {
         this.world.beacon.data.activated = true;
         this.activeSave.beaconStates['verdant_monolith_beacon'] = true;
+        this.worldStateStore.markStructureActivated(
+          this.activeSave.regionId || 'verdant_reach',
+          0,
+          0,
+          'verdant_monolith_beacon'
+        );
 
         // Quest progress
         this.quests.reportProgress('ACTIVATE_BEACON', 'verdant_monolith_beacon', 1);
@@ -1400,6 +1630,8 @@ export class GameEngine {
       this.activeSave.defeatedBosses = Array.from(this.bossManager.defeatedBosses);
       this.activeSave.claimedBossRewards = Array.from(this.bossManager.claimedBossRewards);
     }
+    this.wildlife?.flushStateToStore();
+    this.worldStateStore.syncToSave(this.activeSave);
     StorageService.saveGame(this.activeSave);
   }
 
@@ -1532,17 +1764,8 @@ export class GameEngine {
    */
   public applySettings(newSettings: GameSettings): void {
     this.activeSave.settings = { ...newSettings };
-    if (this.bundle && this.container) {
-      RenderPipeline.applySettings(
-        this.bundle,
-        newSettings,
-        this.container.clientWidth,
-        this.container.clientHeight
-      );
-    }
-    if (this.weather) {
-      this.weather.setParticleLimit(newSettings.particleLimit);
-    }
+    this.governor?.syncSettings(newSettings);
+    this.applyResolvedQualityConfig();
     if (this.cameraManager) {
       this.cameraManager.sensitivity = newSettings.cameraSensitivity;
       this.cameraManager.setMode(newSettings.cameraMode);
@@ -1568,12 +1791,14 @@ export class GameEngine {
     document.removeEventListener('visibilitychange', this.handleVisibilityChange);
     this.input.dispose();
     AudioService.stopAmbience();
+    this.chunkManager?.dispose();
     this.player?.dispose();
     this.entities?.dispose();
     this.wildlife?.dispose();
     this.combatEnemies?.dispose();
     this.bossManager?.dispose();
     this.structures?.dispose();
+    this.portals?.dispose();
     this.crimsonWarden?.dispose();
     this.weather?.dispose();
     this.dayNight?.dispose();

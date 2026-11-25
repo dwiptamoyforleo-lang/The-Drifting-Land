@@ -1,17 +1,15 @@
 /**
  * Crimson Warden Boss Encounter & Red Moon Rift System.
- * - Spawns at the Shattered Rift Crater landmark ([-52, y, -45]) during Red Moon
- * - 3D procedural animated boss model with obsidian armor, glowing core, and floating blade
- * - Readable ground attack telegraph warning rings
- * - Phase 1 (100% - 50%) and Phase 2 Enraged (50% - 0%)
- * - Unique, non-duplicate reward claiming (Crimson Core, Warden's Blood Amulet)
- * - Safe leash and reset if player retreats
+ * - Replaces 2 dynamic PointLights with baked additive glow sprites (SharedAssets)
+ * - Throttles UI telegraph state updates to ~10 Hz (instead of 60 Hz React re-renders)
+ * - Supports region scoping & complete GPU resource disposal
  */
 
 import * as THREE from 'three';
 import { CrimsonWardenState } from '../types/game';
 import { NotificationSystem } from './notificationSystem';
 import { AudioService } from '../services/audio';
+import { SharedAssets } from '../engine/sharedAssets';
 
 export interface BossCallbacks {
   onBossStateChange: (state: CrimsonWardenState | null) => void;
@@ -20,13 +18,13 @@ export interface BossCallbacks {
 }
 
 export class CrimsonWardenEncounter {
+  private scene: THREE.Scene;
   public group: THREE.Group;
   public riftGroup: THREE.Group;
   public arenaCenter: THREE.Vector3;
-  private isSoftwareGl: boolean;
   private callbacks: BossCallbacks;
+  private regionActive: boolean = true;
 
-  // Boss state
   public state: CrimsonWardenState = {
     id: 'crimson_warden',
     name: 'Crimson Warden',
@@ -39,26 +37,20 @@ export class CrimsonWardenEncounter {
     isDefeated: false,
   };
 
-  // 3D Visual Meshes
   private bossMeshGroup: THREE.Group;
   private torsoMesh: THREE.Mesh;
   private coreMesh: THREE.Mesh;
   private swordMesh: THREE.Mesh;
-  private auraLight: THREE.PointLight;
+  private auraGlowSprite: THREE.Sprite;
 
-  // Attack telegraph ring mesh
   private telegraphMesh: THREE.Mesh;
   private telegraphMat: THREE.MeshBasicMaterial;
 
-  // Rift Portal Meshes
   private riftCoreMesh: THREE.Mesh;
   private riftRing1: THREE.Mesh;
   private riftRing2: THREE.Mesh;
-  private riftLight: THREE.PointLight;
 
-  // Combat Timers
   private attackTimer: number = 0;
-  private attackInterval: number = 3.8;
   private currentTelegraph: {
     type: 'CLEAVE' | 'NOVA';
     timer: number;
@@ -69,8 +61,8 @@ export class CrimsonWardenEncounter {
     damage: number;
   } | null = null;
 
-  private isEngaged: boolean = false;
   private playerInvulnerableTimer: number = 0;
+  private uiNotifyTimer: number = 0;
 
   constructor(
     scene: THREE.Scene,
@@ -79,11 +71,10 @@ export class CrimsonWardenEncounter {
     isDefeated = false,
     isSoftwareGl = false
   ) {
+    this.scene = scene;
     this.callbacks = callbacks;
-    this.isSoftwareGl = isSoftwareGl;
     this.state.isDefeated = isDefeated;
 
-    // Arena location: Western Crater [-52, -45]
     const arenaX = -52;
     const arenaZ = -45;
     const arenaY = getTerrainHeight(arenaX, arenaZ);
@@ -93,111 +84,129 @@ export class CrimsonWardenEncounter {
     this.group.name = 'crimson_warden_encounter';
     scene.add(this.group);
 
-    // 1. Build Shattered Rift Portal & Obelisks
     this.riftGroup = new THREE.Group();
     this.riftGroup.position.copy(this.arenaCenter);
     this.group.add(this.riftGroup);
 
-    // Basalt Rift Ring Pillars
-    const pillarMat = new THREE.MeshStandardMaterial({
-      color: 0x18181b,
-      roughness: 0.85,
-      metalness: 0.2,
-      flatShading: true,
-    });
+    const pillarMat = SharedAssets.getMaterial('cw_pillar_mat', () =>
+      new THREE.MeshStandardMaterial({
+        color: 0x18181b,
+        roughness: 0.85,
+        metalness: 0.2,
+        flatShading: true,
+      })
+    );
+    const runeMat = SharedAssets.getMaterial('cw_rune_mat', () =>
+      new THREE.MeshBasicMaterial({ color: 0xef4444 })
+    );
 
     for (let i = 0; i < 6; i++) {
       const angle = (i * Math.PI) / 3;
       const px = Math.cos(angle) * 8.5;
       const pz = Math.sin(angle) * 8.5;
       const h = 6 + (i % 3) * 2;
-      const pillar = new THREE.Mesh(new THREE.BoxGeometry(1.2, h, 1.2), pillarMat);
+      const pillar = new THREE.Mesh(
+        SharedAssets.getGeometry(`cw_pillar_${h}`, () => new THREE.BoxGeometry(1.2, h, 1.2)),
+        pillarMat
+      );
       pillar.position.set(px, h / 2, pz);
       pillar.rotation.y = angle + 0.2;
       pillar.castShadow = !isSoftwareGl;
       this.riftGroup.add(pillar);
 
-      // Crimson runic glow strip
       const rune = new THREE.Mesh(
-        new THREE.BoxGeometry(0.2, h * 0.7, 0.2),
-        new THREE.MeshBasicMaterial({ color: 0xef4444 })
+        SharedAssets.getGeometry(`cw_rune_${h}`, () => new THREE.BoxGeometry(0.2, h * 0.7, 0.2)),
+        runeMat
       );
       rune.position.set(px * 0.95, h / 2, pz * 0.95);
       this.riftGroup.add(rune);
     }
 
-    // Swirling Void Rift Core
-    const riftGeo = new THREE.OctahedronGeometry(2.2, 1);
-    const riftMat = new THREE.MeshStandardMaterial({
-      color: 0x991b1b,
-      emissive: 0xef4444,
-      emissiveIntensity: 0.9,
-      roughness: 0.1,
-      metalness: 0.9,
-    });
+    const riftGeo = SharedAssets.getGeometry('cw_rift_core', () => new THREE.OctahedronGeometry(2.2, 1));
+    const riftMat = SharedAssets.getMaterial('cw_rift_mat', () =>
+      new THREE.MeshStandardMaterial({
+        color: 0x991b1b,
+        emissive: 0xef4444,
+        emissiveIntensity: 0.9,
+        roughness: 0.1,
+        metalness: 0.9,
+      })
+    );
     this.riftCoreMesh = new THREE.Mesh(riftGeo, riftMat);
     this.riftCoreMesh.position.set(0, 3.5, 0);
     this.riftGroup.add(this.riftCoreMesh);
 
-    // Orbiting Rift Rings
-    const ringMat = new THREE.MeshBasicMaterial({
-      color: 0xf87171,
-      transparent: true,
-      opacity: 0.6,
-      side: THREE.DoubleSide,
-    });
-    this.riftRing1 = new THREE.Mesh(new THREE.TorusGeometry(3.6, 0.12, 8, 24), ringMat);
+    const ringMat = SharedAssets.getMaterial('cw_ring_mat', () =>
+      new THREE.MeshBasicMaterial({
+        color: 0xf87171,
+        transparent: true,
+        opacity: 0.6,
+        side: THREE.DoubleSide,
+      })
+    );
+    this.riftRing1 = new THREE.Mesh(
+      SharedAssets.getGeometry('cw_ring_1', () => new THREE.TorusGeometry(3.6, 0.12, 8, 24)),
+      ringMat
+    );
     this.riftRing1.position.set(0, 3.5, 0);
     this.riftGroup.add(this.riftRing1);
 
-    this.riftRing2 = new THREE.Mesh(new THREE.TorusGeometry(4.8, 0.14, 8, 24), ringMat);
+    this.riftRing2 = new THREE.Mesh(
+      SharedAssets.getGeometry('cw_ring_2', () => new THREE.TorusGeometry(4.8, 0.14, 8, 24)),
+      ringMat
+    );
     this.riftRing2.position.set(0, 3.5, 0);
     this.riftGroup.add(this.riftRing2);
 
-    this.riftLight = new THREE.PointLight(0xef4444, 1.5, 30);
-    this.riftLight.position.set(0, 4, 0);
-    this.riftGroup.add(this.riftLight);
+    // Baked glow sprite replaces costly dynamic PointLight
+    const riftGlow = SharedAssets.createGlowSprite(0xef4444, 7.5, 0.65);
+    riftGlow.position.set(0, 3.6, 0);
+    this.riftGroup.add(riftGlow);
 
-    // 2. Build Procedural Crimson Warden Boss Model
+    // 2. Crimson Warden Boss Model
     this.bossMeshGroup = new THREE.Group();
     this.bossMeshGroup.position.copy(this.arenaCenter);
     this.bossMeshGroup.position.y += 0.5;
     this.group.add(this.bossMeshGroup);
 
-    // Torso / Obsidian Cuirass
-    const armorMat = new THREE.MeshStandardMaterial({
-      color: 0x27272a,
-      roughness: 0.7,
-      metalness: 0.8,
-      flatShading: true,
-    });
-    this.torsoMesh = new THREE.Mesh(new THREE.BoxGeometry(1.8, 2.2, 1.2), armorMat);
+    const armorMat = SharedAssets.getMaterial('cw_armor_mat', () =>
+      new THREE.MeshStandardMaterial({
+        color: 0x27272a,
+        roughness: 0.7,
+        metalness: 0.8,
+        flatShading: true,
+      })
+    );
+    this.torsoMesh = new THREE.Mesh(
+      SharedAssets.getGeometry('cw_torso', () => new THREE.BoxGeometry(1.8, 2.2, 1.2)),
+      armorMat
+    );
     this.torsoMesh.position.y = 2.4;
     this.torsoMesh.castShadow = !isSoftwareGl;
     this.bossMeshGroup.add(this.torsoMesh);
 
-    // Horned Obsidian Mask / Head
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.9), armorMat);
+    const head = new THREE.Mesh(
+      SharedAssets.getGeometry('cw_head', () => new THREE.BoxGeometry(0.9, 0.9, 0.9)),
+      armorMat
+    );
     head.position.y = 3.9;
     this.bossMeshGroup.add(head);
 
-    // Glowing Visor slit
     const visor = new THREE.Mesh(
-      new THREE.BoxGeometry(0.7, 0.15, 0.2),
-      new THREE.MeshBasicMaterial({ color: 0xef4444 })
+      SharedAssets.getGeometry('cw_visor', () => new THREE.BoxGeometry(0.7, 0.15, 0.2)),
+      runeMat
     );
     visor.position.set(0, 3.9, 0.48);
     this.bossMeshGroup.add(visor);
 
-    // Horns
+    const hornGeo = SharedAssets.getGeometry('cw_horn', () => new THREE.ConeGeometry(0.2, 1.1, 5));
     for (const sx of [-0.6, 0.6]) {
-      const horn = new THREE.Mesh(new THREE.ConeGeometry(0.2, 1.1, 5), armorMat);
+      const horn = new THREE.Mesh(hornGeo, armorMat);
       horn.position.set(sx, 4.7, 0);
       horn.rotation.z = (sx > 0 ? -1 : 1) * 0.4;
       this.bossMeshGroup.add(horn);
     }
 
-    // Glowing Crimson Void Core in chest
     const coreMat = new THREE.MeshStandardMaterial({
       color: 0xef4444,
       emissive: 0xdc2626,
@@ -205,49 +214,57 @@ export class CrimsonWardenEncounter {
       roughness: 0.2,
       metalness: 0.8,
     });
-    this.coreMesh = new THREE.Mesh(new THREE.OctahedronGeometry(0.55, 0), coreMat);
+    this.coreMesh = new THREE.Mesh(
+      SharedAssets.getGeometry('cw_core', () => new THREE.OctahedronGeometry(0.55, 0)),
+      coreMat
+    );
     this.coreMesh.position.set(0, 2.4, 0.5);
     this.bossMeshGroup.add(this.coreMesh);
 
-    // Spiked Pauldrons (Shoulders)
+    const pauldronGeo = SharedAssets.getGeometry('cw_pauldron', () => new THREE.ConeGeometry(0.7, 1.2, 4));
     for (const sx of [-1.3, 1.3]) {
-      const pauldron = new THREE.Mesh(new THREE.ConeGeometry(0.7, 1.2, 4), armorMat);
+      const pauldron = new THREE.Mesh(pauldronGeo, armorMat);
       pauldron.position.set(sx, 3.3, 0);
       pauldron.rotation.z = (sx > 0 ? -1 : 1) * 0.5;
       this.bossMeshGroup.add(pauldron);
     }
 
-    // Floating Greatsword
     const bladeGroup = new THREE.Group();
     bladeGroup.position.set(1.8, 2.2, 0);
     const blade = new THREE.Mesh(
-      new THREE.BoxGeometry(0.3, 3.8, 0.1),
-      new THREE.MeshStandardMaterial({
-        color: 0x991b1b,
-        emissive: 0x7f1d1d,
-        emissiveIntensity: 0.5,
-        metalness: 0.9,
-        roughness: 0.2,
-      })
+      SharedAssets.getGeometry('cw_blade', () => new THREE.BoxGeometry(0.3, 3.8, 0.1)),
+      SharedAssets.getMaterial('cw_blade_mat', () =>
+        new THREE.MeshStandardMaterial({
+          color: 0x991b1b,
+          emissive: 0x7f1d1d,
+          emissiveIntensity: 0.5,
+          metalness: 0.9,
+          roughness: 0.2,
+        })
+      )
     );
     blade.position.y = 1.9;
     bladeGroup.add(blade);
 
-    const guard = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.2, 0.2), armorMat);
+    const guard = new THREE.Mesh(
+      SharedAssets.getGeometry('cw_guard', () => new THREE.BoxGeometry(1.0, 0.2, 0.2)),
+      armorMat
+    );
     guard.position.y = 0.1;
     bladeGroup.add(guard);
 
     this.swordMesh = bladeGroup as unknown as THREE.Mesh;
     this.bossMeshGroup.add(bladeGroup);
 
-    // Boss Light Aura
-    this.auraLight = new THREE.PointLight(0xef4444, 1.8, 18);
-    this.auraLight.position.set(0, 2.8, 0);
-    this.bossMeshGroup.add(this.auraLight);
+    this.auraGlowSprite = SharedAssets.createGlowSprite(0xef4444, 5.2, 0.65);
+    this.auraGlowSprite.position.set(0, 2.8, 0);
+    this.bossMeshGroup.add(this.auraGlowSprite);
 
-    // 3. Ground Attack Telegraph Ring
-    const teleGeo = new THREE.RingGeometry(0.2, 5.0, 32);
-    teleGeo.rotateX(-Math.PI / 2);
+    const teleGeo = SharedAssets.getGeometry('boss_telegraph_ring', () => {
+      const g = new THREE.RingGeometry(0.1, 5.0, 28);
+      g.rotateX(-Math.PI / 2);
+      return g;
+    });
     this.telegraphMat = new THREE.MeshBasicMaterial({
       color: 0xef4444,
       transparent: true,
@@ -259,13 +276,28 @@ export class CrimsonWardenEncounter {
     this.telegraphMesh.visible = false;
     scene.add(this.telegraphMesh);
 
-    // Initial visibility
     this.bossMeshGroup.visible = false;
+    this.riftGroup.visible = false;
   }
 
-  /**
-   * Main update loop for boss combat AI and animation
-   */
+  public setRegionActive(active: boolean, getTerrainHeight?: (x: number, z: number) => number): void {
+    this.regionActive = active;
+    if (!active) {
+      if (this.state.active) {
+        this.despawnBoss();
+      }
+      this.group.visible = false;
+      this.telegraphMesh.visible = false;
+    } else {
+      this.group.visible = true;
+      if (getTerrainHeight) {
+        const y = getTerrainHeight(this.arenaCenter.x, this.arenaCenter.z);
+        this.arenaCenter.y = y;
+        this.riftGroup.position.y = y;
+      }
+    }
+  }
+
   update(
     delta: number,
     totalTime: number,
@@ -273,29 +305,31 @@ export class CrimsonWardenEncounter {
     isRedMoonActive: boolean,
     getTerrainHeight: (x: number, z: number) => number
   ): void {
-    // 1. Animate Rift
-    this.riftCoreMesh.rotation.y += delta * 1.5;
-    this.riftCoreMesh.rotation.x += delta * 0.8;
-    this.riftRing1.rotation.x += delta * 1.8;
-    this.riftRing2.rotation.y += delta * 1.4;
+    if (!this.regionActive) return;
 
     if (this.playerInvulnerableTimer > 0) {
       this.playerInvulnerableTimer -= delta;
     }
 
-    // Only active during Red Moon and if not defeated
     if (!isRedMoonActive || this.state.isDefeated) {
       if (this.state.active) {
         this.despawnBoss();
       }
-      this.riftGroup.visible = isRedMoonActive;
+      this.riftGroup.visible = false;
+      return;
+    }
+
+    const distToCrater = playerPos.distanceTo(this.arenaCenter);
+    if (distToCrater > 95 && !this.state.active) {
+      this.riftGroup.visible = false;
       return;
     }
 
     this.riftGroup.visible = true;
-
-    // Check proximity to trigger encounter (within 35m of crater)
-    const distToCrater = playerPos.distanceTo(this.arenaCenter);
+    this.riftCoreMesh.rotation.y += delta * 1.5;
+    this.riftCoreMesh.rotation.x += delta * 0.8;
+    this.riftRing1.rotation.x += delta * 1.8;
+    this.riftRing2.rotation.y += delta * 1.4;
 
     if (!this.state.active) {
       if (distToCrater < 32) {
@@ -304,14 +338,12 @@ export class CrimsonWardenEncounter {
       return;
     }
 
-    // Leash check: If player retreats beyond 55m, boss resets
     if (distToCrater > 55) {
       this.resetEncounter();
       NotificationSystem.notify('Crimson Warden', 'The warden disengages as you flee the crater.', 'info');
       return;
     }
 
-    // Combat AI Loop
     this.updateBossCombat(delta, totalTime, playerPos, getTerrainHeight);
   }
 
@@ -321,8 +353,7 @@ export class CrimsonWardenEncounter {
     this.state.phase = 1;
     this.bossMeshGroup.position.copy(this.arenaCenter);
     this.bossMeshGroup.visible = true;
-    this.isEngaged = true;
-    this.attackTimer = 2.0; // Grace period before first attack
+    this.attackTimer = 2.0;
 
     AudioService.playBeaconActivate();
     NotificationSystem.notify(
@@ -350,9 +381,6 @@ export class CrimsonWardenEncounter {
     this.callbacks.onBossStateChange(null);
   }
 
-  /**
-   * Combat AI: Movement, Telegraphing, Attack execution
-   */
   private updateBossCombat(
     delta: number,
     totalTime: number,
@@ -362,15 +390,12 @@ export class CrimsonWardenEncounter {
     const bossPos = this.bossMeshGroup.position;
     const distToPlayer = bossPos.distanceTo(playerPos);
 
-    // Face player
     const targetAngle = Math.atan2(playerPos.x - bossPos.x, playerPos.z - bossPos.z);
     this.bossMeshGroup.rotation.y = THREE.MathUtils.lerp(this.bossMeshGroup.rotation.y, targetAngle, delta * 3.5);
 
-    // Hover bobbing
     const groundY = getTerrainHeight(bossPos.x, bossPos.z);
     bossPos.y = groundY + 0.3 + Math.sin(totalTime * 2.5) * 0.25;
 
-    // Movement toward player if outside melee range
     const desiredDist = 4.2;
     const moveSpeed = this.state.phase === 2 ? 6.5 : 4.5;
 
@@ -381,22 +406,20 @@ export class CrimsonWardenEncounter {
       bossPos.z += dirZ * moveSpeed * delta;
     }
 
-    // Sword idle float animation
     this.swordMesh.rotation.z = Math.sin(totalTime * 3.0) * 0.15;
     this.swordMesh.position.y = 2.2 + Math.cos(totalTime * 2.0) * 0.2;
 
-    // Phase 2 Enraged Visuals
     if (this.state.phase === 2) {
       (this.coreMesh.material as THREE.MeshStandardMaterial).emissiveIntensity = 2.5 + Math.sin(totalTime * 6) * 0.8;
-      this.auraLight.intensity = 3.0;
+      this.auraGlowSprite.scale.set(6.8, 6.8, 1);
     }
 
-    // Attack Telegraph Lifecycle
+    this.uiNotifyTimer += delta;
+
     if (this.currentTelegraph) {
       this.currentTelegraph.timer += delta;
       const progress = Math.min(1.0, this.currentTelegraph.timer / this.currentTelegraph.duration);
 
-      // Update 3D ground warning ring scale and pulsing red opacity
       this.telegraphMesh.visible = true;
       this.telegraphMesh.position.set(
         this.currentTelegraph.x,
@@ -408,6 +431,7 @@ export class CrimsonWardenEncounter {
       this.telegraphMesh.scale.set(targetScale * progress, 1, targetScale * progress);
       this.telegraphMat.opacity = 0.3 + progress * 0.55;
 
+      const isNewWarning = !this.state.attackWarning;
       this.state.attackWarning = {
         type: this.currentTelegraph.type,
         progress,
@@ -415,14 +439,15 @@ export class CrimsonWardenEncounter {
         z: this.currentTelegraph.z,
         radius: this.currentTelegraph.radius,
       };
-      this.callbacks.onBossStateChange(this.state);
+      if (isNewWarning || this.uiNotifyTimer >= 0.1) {
+        this.uiNotifyTimer = 0;
+        this.callbacks.onBossStateChange({ ...this.state });
+      }
 
-      // Telegraph Completed -> Strike!
       if (progress >= 1.0) {
         this.executeAttack(playerPos);
       }
     } else {
-      // Cooldown timer until next telegraphed attack
       this.attackTimer -= delta;
       if (this.attackTimer <= 0) {
         this.startRandomAttack(playerPos);
@@ -431,16 +456,14 @@ export class CrimsonWardenEncounter {
   }
 
   private startRandomAttack(playerPos: THREE.Vector3): void {
-    // Phase 1 has Cleave; Phase 2 unlocks massive Dimensional Nova
     const isPhase2 = this.state.phase === 2;
     const chooseNova = isPhase2 && Math.random() < 0.55;
 
     if (chooseNova) {
-      // Massive 10m Ground Nova centered on boss
       this.currentTelegraph = {
         type: 'NOVA',
         timer: 0,
-        duration: 2.2, // Readable warning time
+        duration: 2.2,
         radius: 9.5,
         x: this.bossMeshGroup.position.x,
         z: this.bossMeshGroup.position.z,
@@ -448,7 +471,6 @@ export class CrimsonWardenEncounter {
       };
       NotificationSystem.notify('Crimson Warden', 'Warning: Dimensional Nova preparing!', 'danger', 2500);
     } else {
-      // 5.5m Cleave centered on player's position
       this.currentTelegraph = {
         type: 'CLEAVE',
         timer: 0,
@@ -465,8 +487,6 @@ export class CrimsonWardenEncounter {
     if (!this.currentTelegraph) return;
 
     const hitDist = Math.hypot(playerPos.x - this.currentTelegraph.x, playerPos.z - this.currentTelegraph.z);
-
-    // Audio feedback for attack impact
     AudioService.playDash();
 
     if (hitDist <= this.currentTelegraph.radius && this.playerInvulnerableTimer <= 0) {
@@ -487,47 +507,20 @@ export class CrimsonWardenEncounter {
   private cancelTelegraph(): void {
     this.currentTelegraph = null;
     this.telegraphMesh.visible = false;
-    this.state.attackWarning = null;
-    this.callbacks.onBossStateChange(this.state);
+    if (this.state.attackWarning !== null) {
+      this.state.attackWarning = null;
+      this.callbacks.onBossStateChange({ ...this.state });
+    }
   }
 
-  /**
-   * Player attacks the Crimson Warden (Action key / click)
-   */
   public playerAttack(playerPos: THREE.Vector3): boolean {
     if (!this.state.active || this.state.isDefeated) return false;
-
     const dist = this.bossMeshGroup.position.distanceTo(playerPos);
-    if (dist > 6.0) return false; // Out of melee attack range
-
-    // Deal damage
-    const damage = Math.floor(Math.random() * 25) + 40; // 40-64 damage per strike
-    this.state.health = Math.max(0, this.state.health - damage);
-
-    // Sound and visual reaction
+    if (dist > 6.0) return false;
+    const damage = Math.floor(Math.random() * 25) + 40;
     AudioService.playRelicCollect();
     NotificationSystem.notify('Strike!', `Dealt ${damage} damage to Crimson Warden!`, 'info', 1800);
-
-    // Phase transition check at 50% HP (300 HP)
-    if (this.state.health <= 300 && this.state.phase === 1) {
-      this.state.phase = 2;
-      NotificationSystem.notify(
-        'Crimson Warden Enraged!',
-        'The warden unlocks the Void Seal! Speed and attack power surge!',
-        'danger',
-        6000
-      );
-      AudioService.playBeaconActivate();
-    }
-
-    // Check defeat
-    if (this.state.health <= 0) {
-      this.handleDefeat();
-    } else {
-      this.callbacks.onBossStateChange(this.state);
-    }
-
-    return true;
+    return this.takeDamage(damage);
   }
 
   public takeDamage(damage: number): boolean {
@@ -548,7 +541,7 @@ export class CrimsonWardenEncounter {
     if (this.state.health <= 0) {
       this.handleDefeat();
     } else {
-      this.callbacks.onBossStateChange(this.state);
+      this.callbacks.onBossStateChange({ ...this.state });
     }
     return true;
   }
@@ -576,7 +569,9 @@ export class CrimsonWardenEncounter {
   }
 
   dispose(): void {
-    this.telegraphMesh.geometry.dispose();
+    this.scene.remove(this.group);
+    SharedAssets.disposeObject3DSafe(this.group);
+    this.scene.remove(this.telegraphMesh);
     this.telegraphMat.dispose();
   }
 }
