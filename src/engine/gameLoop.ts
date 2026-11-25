@@ -25,8 +25,10 @@ import {
   Checkpoint,
   GameSettings,
   EngineDiagnostics,
+  WebGLDiagnosticReport,
 } from '../types/game';
 import { RenderPipeline, RendererBundle } from './renderer';
+import { SharedAssets } from './sharedAssets';
 import { WorldGenerator, WorldBundle } from './world';
 import { PlayerController } from './player';
 import { CameraManager, ObserverTarget } from './cameraManager';
@@ -98,6 +100,7 @@ export interface EngineUiCallbacks {
   onInspectPortal?: (portal: PortalDefinition, check: PortalUnlockCheck) => void;
   onStartDimensionTransition?: (destinationRegionId: string) => void;
   onPlayerDefeated?: (checkpoint: Checkpoint | null) => void;
+  onContextUnrecoverable?: (report: WebGLDiagnosticReport) => void;
 }
 
 export class GameEngine {
@@ -129,6 +132,9 @@ export class GameEngine {
 
   private mode: GameMode = 'TITLE';
   private isRunning: boolean = false;
+  private isDisposed: boolean = false;
+  private isContextLost: boolean = false;
+  private contextLostTimeoutId: number | null = null;
   private frameId: number = 0;
   private clock: THREE.Clock = new THREE.Clock();
   private totalSimulationTime: number = 0;
@@ -241,39 +247,73 @@ export class GameEngine {
 
   private handleContextLost = (): void => {
     this.isRunning = false;
+    this.isContextLost = true;
     if (this.frameId) {
       cancelAnimationFrame(this.frameId);
       clearTimeout(this.frameId);
+      this.frameId = 0;
     }
-    NotificationSystem.notify('Graphics Reset', 'WebGL context lost. Awaiting restoration...', 'danger', 4000);
+    if (this.contextLostTimeoutId !== null) {
+      clearTimeout(this.contextLostTimeoutId);
+    }
+    NotificationSystem.notify('Graphics Reset', 'WebGL context lost. Waiting for GPU restoration...', 'danger', 5000);
+
+    // If the browser cannot restore the context within 6 seconds, surface a friendly recovery screen
+    this.contextLostTimeoutId = window.setTimeout(() => {
+      this.contextLostTimeoutId = null;
+      if (this.isDisposed || !this.isContextLost) return;
+      const probe = RenderPipeline.probeWebGLCapabilities(true);
+      const report = RenderPipeline.buildDiagnosticReport(
+        probe,
+        RenderPipeline.isMobileDevice(),
+        [],
+        undefined,
+        'WebGL graphics context was lost during gameplay and could not be restored automatically.'
+      );
+      this.uiCallbacks.onContextUnrecoverable?.(report);
+    }, 6000);
   };
 
   private handleContextRestored = (): void => {
+    if (this.isDisposed || !this.bundle) return;
+    if (this.contextLostTimeoutId !== null) {
+      clearTimeout(this.contextLostTimeoutId);
+      this.contextLostTimeoutId = null;
+    }
+    this.isContextLost = false;
+    this.applyResolvedQualityConfig();
+    this.syncStreamingVisibility();
     this.isRunning = true;
     this.clock.start();
+    this.clock.getDelta();
     this.startLoop();
     NotificationSystem.notify('Graphics Restored', 'WebGL context restored successfully.', 'discovery', 3000);
   };
 
+  private yieldToMainThread(): Promise<void> {
+    return new Promise((resolve) => window.setTimeout(resolve, 0));
+  }
+
   /**
    * Complete initialization sequence
+   * Directly creates the WebGLRenderer with multi-step fallback instead of a blocking pre-check.
    */
   async init(onProgress?: (phase: string, percent: number) => void): Promise<boolean> {
     try {
-      // 1. Check WebGL support
-      onProgress?.('Verifying WebGL context & shaders...', 15);
-      if (!RenderPipeline.isWebGLAvailable()) {
-        throw new Error('WebGL is not supported by your browser or hardware.');
-      }
-
-      // 2. Initialize Three.js pipeline with device presets & Adaptive Quality Governor
-      onProgress?.('Compiling Three.js render pipeline...', 35);
-      this.bundle = RenderPipeline.init(
+      // 1. Initialize Three.js pipeline directly with fallback recovery (no separate probe pre-check)
+      onProgress?.('Initializing Three.js WebGL pipeline...', 20);
+      this.bundle = await RenderPipeline.init(
         this.container,
         this.activeSave.settings,
         this.handleContextLost,
         this.handleContextRestored
       );
+      if (this.isDisposed) {
+        this.bundle.dispose();
+        this.bundle = null;
+        return false;
+      }
+
       this.governor = new PerformanceGovernor(
         this.activeSave.settings,
         this.bundle.isSoftwareGl,
@@ -281,8 +321,12 @@ export class GameEngine {
       );
       this.currentQualityConfig = this.governor.getConfig(this.activeSave.settings);
 
-      // 3. Build current destination world & spatial chunk streamer
-      onProgress?.('Synthesizing floating archipelago & terrain...', 60);
+      // Yield briefly so mobile UI/progress bar stays responsive before world construction
+      await this.yieldToMainThread();
+      if (this.isDisposed) return false;
+
+      // 2. Build current destination world & spatial chunk streamer
+      onProgress?.('Synthesizing floating archipelago & terrain...', 50);
       const maxAnisotropy = this.bundle.isSoftwareGl ? 1 : this.bundle.renderer.capabilities.getMaxAnisotropy();
       const currentRegion = this.activeSave.regionId || 'verdant_reach';
       this.world = WorldGenerator.generate(currentRegion, maxAnisotropy, this.bundle.isSoftwareGl);
@@ -302,8 +346,11 @@ export class GameEngine {
         this.currentQualityConfig
       );
 
-      // 4. Build Player Explorer
-      onProgress?.('Populating flora, wildlife & sanctuaries...', 80);
+      await this.yieldToMainThread();
+      if (this.isDisposed) return false;
+
+      // 3. Build Player Explorer
+      onProgress?.('Populating flora, wildlife & sanctuaries...', 75);
       this.player = new PlayerController(this.activeSave.playerPosition, this.bundle.isSoftwareGl);
       this.player.stats = { ...this.activeSave.playerStats };
       const regionDef = REGIONS[currentRegion] || REGIONS.verdant_reach;
@@ -502,15 +549,21 @@ export class GameEngine {
       // Handle window resizing
       window.addEventListener('resize', this.handleResize);
 
+      if (this.isDisposed) return false;
+
       // Start render loop
       this.isRunning = true;
       this.clock.start();
       this.startLoop();
 
+      // Defer optional RoomEnvironment PMREM generation until after first frame (desktop Medium/High only)
+      this.bundle.scheduleLazyEnvironment();
+
       onProgress?.('Synchronizing portals & celestial alignment...', 100);
       return true;
     } catch (err) {
       console.error('Game initialization failed:', err);
+      this.dispose();
       throw err;
     }
   }
@@ -1779,13 +1832,19 @@ export class GameEngine {
   }
 
   /**
-   * Clean up all WebGL, entities, and event listeners without memory leaks
+   * Clean up all WebGL contexts, geometries, materials, textures, and event listeners without memory leaks
    */
   dispose(): void {
+    this.isDisposed = true;
     this.isRunning = false;
     if (this.frameId) {
       cancelAnimationFrame(this.frameId);
       clearTimeout(this.frameId);
+      this.frameId = 0;
+    }
+    if (this.contextLostTimeoutId !== null) {
+      clearTimeout(this.contextLostTimeoutId);
+      this.contextLostTimeoutId = null;
     }
     window.removeEventListener('resize', this.handleResize);
     document.removeEventListener('visibilitychange', this.handleVisibilityChange);
@@ -1803,6 +1862,22 @@ export class GameEngine {
     this.weather?.dispose();
     this.dayNight?.dispose();
     this.world?.dispose();
+    SharedAssets.disposeAll();
     this.bundle?.dispose();
+
+    this.chunkManager = null;
+    this.player = null;
+    this.entities = null;
+    this.wildlife = null;
+    this.combatEnemies = null;
+    this.bossManager = null;
+    this.structures = null;
+    this.portals = null;
+    this.crimsonWarden = null;
+    this.dayNight = null;
+    this.world = null;
+    this.bundle = null;
+    this.cameraManager = null;
+    this.interactions = null;
   }
 }

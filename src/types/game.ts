@@ -640,3 +640,28 @@ export interface InputState {
   lookDeltaX: number;
   lookDeltaY: number;
 }
+
+export interface WebGLAttemptLog {
+  attempt: number;
+  label: string;
+  success: boolean;
+  error?: string;
+}
+
+export interface WebGLDiagnosticReport {
+  summary: string;
+  webgl2Available: boolean;
+  webgl1Available: boolean;
+  gpuRenderer: string;
+  gpuVendor: string;
+  isSoftwareGl: boolean;
+  isMobile: boolean;
+  userAgent: string;
+  devicePixelRatio: number;
+  screenSize: string;
+  viewportSize: string;
+  contextCreationError?: string;
+  attempts: WebGLAttemptLog[];
+  timestamp: string;
+}
+

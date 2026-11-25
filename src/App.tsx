@@ -21,9 +21,11 @@ import {
   PlayerWallet,
   Checkpoint,
   EngineDiagnostics,
+  WebGLDiagnosticReport,
 } from './types/game';
 import { StorageService, createInitialSave } from './services/storage';
 import { GameEngine } from './engine/gameLoop';
+import { WebGLInitError } from './engine/renderer';
 import { GameCanvas } from './components/GameCanvas';
 import { TitleScreen } from './components/TitleScreen';
 import { HUD } from './components/HUD';
@@ -52,6 +54,7 @@ import { getTraderCatalog } from './data/traders';
 export default function App() {
   const [mode, setMode] = useState<GameMode>('TITLE');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [diagnosticReport, setDiagnosticReport] = useState<WebGLDiagnosticReport | null>(null);
   const [isInitializing, setIsInitializing] = useState<boolean>(true);
   const [initPhase, setInitPhase] = useState<string>('Verifying WebGL context & shaders...');
   const [initProgress, setInitProgress] = useState<number>(15);
@@ -147,9 +150,11 @@ export default function App() {
     return typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0);
   });
 
-  // Engine instance ref
+  // Engine instance & concurrency guard refs
   const engineRef = useRef<GameEngine | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const initLockRef = useRef<boolean>(false);
+  const isMountedRef = useRef<boolean>(true);
 
   const handleOpenTrade = useCallback((catalogId: string) => {
     const catalog = getTraderCatalog(catalogId);
@@ -168,20 +173,29 @@ export default function App() {
   }, []);
 
   /**
-   * Bootstraps the WebGL GameEngine
+   * Bootstraps the WebGL GameEngine safely with concurrency lock & 1-frame disposal yield
    */
   const initEngine = useCallback(async (container: HTMLDivElement) => {
     containerRef.current = container;
+    if (initLockRef.current) {
+      return;
+    }
+    initLockRef.current = true;
     setIsInitializing(true);
     setErrorMessage(null);
-
-    // Dispose existing engine if present
-    if (engineRef.current) {
-      engineRef.current.dispose();
-      engineRef.current = null;
-    }
+    setDiagnosticReport(null);
+    setInitPhase('Initializing Three.js WebGL pipeline...');
+    setInitProgress(15);
 
     try {
+      // Dispose any previous engine completely and wait one animation frame so the browser frees the old WebGL context
+      if (engineRef.current) {
+        engineRef.current.dispose();
+        engineRef.current = null;
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      if (!isMountedRef.current) return;
+
       const currentSave = StorageService.loadSave();
       setActiveSave(currentSave);
       setSettings(currentSave.settings);
@@ -232,14 +246,27 @@ export default function App() {
             setActiveCheckpointForRespawn(cp);
             setMode('RESPAWN');
           },
+          onContextUnrecoverable: (report) => {
+            setDiagnosticReport(report);
+            setErrorMessage(report.summary);
+            setIsInitializing(false);
+            setMode('ERROR');
+          },
         },
         currentSave
       );
 
-      await engine.init((phase, percent) => {
+      const started = await engine.init((phase, percent) => {
+        if (!isMountedRef.current) return;
         setInitPhase(phase);
         setInitProgress(percent);
       });
+
+      if (!started || !isMountedRef.current) {
+        engine.dispose();
+        return;
+      }
+
       engineRef.current = engine;
 
       // Subscribe to hotbar, wallet, and equipment changes
@@ -259,13 +286,36 @@ export default function App() {
       setTrackedQuest(engine.getTrackedQuest());
 
       setCameraLabel(engine.getCameraLabel());
+      setMode('TITLE');
       setIsInitializing(false);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Engine startup failure:', err);
-      setErrorMessage(err?.message || 'Failed to initialize 3D graphics rendering engine.');
+      if (err instanceof WebGLInitError) {
+        setDiagnosticReport(err.report);
+        setErrorMessage(err.message);
+      } else {
+        setDiagnosticReport(null);
+        setErrorMessage(
+          err instanceof Error ? err.message : 'Failed to initialize 3D graphics rendering engine.'
+        );
+      }
       setMode('ERROR');
       setIsInitializing(false);
+    } finally {
+      initLockRef.current = false;
     }
+  }, [handleOpenTrade]);
+
+  // Clean up WebGL context cleanly on root unmount (StrictMode / navigation safe)
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (engineRef.current) {
+        engineRef.current.dispose();
+        engineRef.current = null;
+      }
+    };
   }, []);
 
   // Save on page exit / refresh
@@ -753,17 +803,20 @@ export default function App() {
       {mode === 'ERROR' && (
         <DiagnosticScreen
           errorMessage={errorMessage || 'An unexpected error occurred.'}
+          diagnosticReport={diagnosticReport}
           onRetry={() => {
-            if (containerRef.current) {
+            if (containerRef.current && !initLockRef.current) {
               initEngine(containerRef.current);
             }
           }}
           onResetSaveAndRetry={() => {
             StorageService.clearSave();
-            if (containerRef.current) {
+            setHasExistingSave(false);
+            if (containerRef.current && !initLockRef.current) {
               initEngine(containerRef.current);
             }
           }}
+          onReloadPage={() => window.location.reload()}
         />
       )}
     </div>

@@ -55,11 +55,8 @@ export class PerformanceGovernor {
     if (settings.graphicsQuality !== 'auto') {
       return settings.graphicsQuality;
     }
-    if (this.isSoftwareGl) return 'low';
+    if (this.isSoftwareGl || this.isMobile) return 'low';
     const cores = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 4 : 8;
-    if (this.isMobile) {
-      return cores <= 4 ? 'low' : 'medium';
-    }
     return cores <= 4 ? 'medium' : 'high';
   }
 
@@ -183,7 +180,7 @@ export class PerformanceGovernor {
       shadowMapSize = 512;
       maxPointLights = 2;
     } else {
-      pixelRatioCap = this.isMobile ? Math.min(dpr, 1.5) : Math.min(dpr, 2.0);
+      pixelRatioCap = this.isMobile ? Math.min(dpr, 1.25) : Math.min(dpr, 2.0);
       activeLoadRadius = 80;
       activeUnloadRadius = 96;
       nearLoadRadius = 175;

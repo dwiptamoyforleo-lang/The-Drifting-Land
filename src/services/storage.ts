@@ -36,7 +36,7 @@ export function isMobileUserAgent(): boolean {
 }
 
 export const DEFAULT_SETTINGS: GameSettings = {
-  graphicsQuality: 'auto',
+  graphicsQuality: isMobileUserAgent() ? 'low' : 'auto',
   renderDistance: isMobileUserAgent() ? 'short' : 'medium',
   fov: 70,
   shadows: !isMobileUserAgent(),
