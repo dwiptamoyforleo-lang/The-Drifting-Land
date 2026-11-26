@@ -55,6 +55,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   hudVisibility: 'full',
   mobileButtonSize: 'normal',
   mobileHaptics: true,
+  mobileFullscreen: false,
   showDiagnostics: false,
 };
 

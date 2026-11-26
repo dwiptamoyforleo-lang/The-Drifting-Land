@@ -676,6 +676,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   {settings.mobileHaptics ? 'ENABLED' : 'DISABLED'}
                 </button>
               </div>
+
+              {/* Optional Mobile Fullscreen */}
+              <div className="flex items-center justify-between p-3 rounded-xl bg-slate-900/60 border border-slate-800">
+                <div>
+                  <div className="text-xs font-semibold text-slate-200">Mobile Fullscreen on Begin</div>
+                  <div className="text-[10px] text-slate-400 font-light">
+                    Request fullscreen when tapping Begin Journey on mobile browsers (never forced)
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    AudioService.playUiClick();
+                    updateSetting('mobileFullscreen', !settings.mobileFullscreen);
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-colors cursor-pointer ${
+                    settings.mobileFullscreen ? 'bg-emerald-600 text-slate-950' : 'bg-slate-800 text-slate-400'
+                  }`}
+                >
+                  {settings.mobileFullscreen ? 'ALLOWED' : 'OFF'}
+                </button>
+              </div>
             </div>
           )}
 

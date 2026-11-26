@@ -168,7 +168,7 @@ export const PauseMenu: React.FC<PauseMenuProps> = ({
             <span>Settings & Controls</span>
           </button>
 
-          {/* Return to Title */}
+          {/* Return to Loading Screen */}
           <button
             onClick={() => {
               AudioService.playUiClick();
@@ -177,7 +177,7 @@ export const PauseMenu: React.FC<PauseMenuProps> = ({
             className="w-full py-2.5 px-4 rounded-xl bg-slate-950 hover:bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200 text-xs font-medium flex items-center justify-center gap-2 cursor-pointer transition-colors mt-1"
           >
             <Home className="w-4 h-4" />
-            <span>Return to Main Menu</span>
+            <span>Return to Loading Screen</span>
           </button>
         </div>
       </div>

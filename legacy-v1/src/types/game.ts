@@ -461,6 +461,7 @@ export interface GameSettings {
   hudVisibility: 'full' | 'compact' | 'minimal' | 'hidden';
   mobileButtonSize: 'normal' | 'large';
   mobileHaptics: boolean;
+  mobileFullscreen?: boolean;
   showDiagnostics: boolean;
 }
 

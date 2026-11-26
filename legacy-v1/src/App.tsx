@@ -49,6 +49,18 @@ import { PerformanceOverlay } from './components/PerformanceOverlay';
 import { PortalDefinition, PortalUnlockCheck } from './data/portals';
 import { AudioService } from './services/audio';
 import { getTraderCatalog } from './data/traders';
+import {
+  GAME_ROOT_FADE_MS,
+  LOADER_SKY_COLOR,
+  getWarmupStatus,
+  hideAndInertLoader,
+  maybeRequestMobileFullscreen,
+  reloadToLoadingScreen,
+  unlockWebAudioOnGesture,
+  warmGameModules,
+} from './bootstrap';
+
+type GameRootTransitionPhase = 'IDLE' | 'FADING_IN' | 'WAKING' | 'REVEALING' | 'ACTIVE' | 'ERROR';
 
 export default function App() {
   const [mode, setMode] = useState<GameMode>('TITLE');
@@ -154,6 +166,14 @@ export default function App() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const initLockRef = useRef<boolean>(false);
   const isMountedRef = useRef<boolean>(true);
+  const loaderHostRef = useRef<HTMLDivElement | null>(null);
+  const loaderFrameRef = useRef<HTMLIFrameElement | null>(null);
+
+  // Section 2 #game-root fade & readiness transition state
+  const [transitionPhase, setTransitionPhase] = useState<GameRootTransitionPhase>('IDLE');
+  const [transitionError, setTransitionError] = useState<string | null>(null);
+  const [loaderInert, setLoaderInert] = useState<boolean>(false);
+  const [curtainOpaque, setCurtainOpaque] = useState<boolean>(false);
 
   const handleOpenTrade = useCallback((catalogId: string) => {
     const catalog = getTraderCatalog(catalogId);
@@ -326,20 +346,119 @@ export default function App() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, []);
 
-  // Mode transitions
-  const handleStartGame = (isNew: boolean, customRegionId?: string) => {
-    if (isNew) {
-      const cleanSave = createInitialSave(activeSlotId);
-      StorageService.saveGame(cleanSave, activeSlotId);
-      setActiveSave(cleanSave);
-      setWallet({ ...cleanSave.wallet });
+  const handleStartGame = useCallback(
+    (isNew: boolean, customRegionId?: string) => {
+      if (isNew) {
+        const cleanSave = createInitialSave(activeSlotId);
+        StorageService.saveGame(cleanSave, activeSlotId);
+        setActiveSave(cleanSave);
+        setWallet({ ...cleanSave.wallet });
+      }
+      if (customRegionId && customRegionId !== activeSave.regionId) {
+        engineRef.current?.switchDestination(customRegionId);
+      }
+      setMode('PLAYING');
+      engineRef.current?.setMode('PLAYING');
+    },
+    [activeSave.regionId, activeSlotId]
+  );
+
+  const handleBeginFromLoader = useCallback(() => {
+    // 1. Unlock WebAudio synchronously on the Begin Journey user gesture
+    unlockWebAudioOnGesture(settings.soundEnabled);
+    // 2. Request fullscreen on mobile only if the user explicitly enabled it
+    maybeRequestMobileFullscreen(Boolean(settings.mobileFullscreen));
+
+    setTransitionError(null);
+    setCurtainOpaque(false);
+    setTransitionPhase('FADING_IN');
+
+    // Kick off fade-in from loader sky colour (#1b3a6b) on next animation frame
+    requestAnimationFrame(() => {
+      if (isMountedRef.current) {
+        setCurtainOpaque(true);
+      }
+    });
+  }, [settings.mobileFullscreen, settings.soundEnabled]);
+
+  // Complete the 900ms fade-in, verify module/engine readiness, hide/inert loader, and reveal game
+  useEffect(() => {
+    if (transitionPhase !== 'FADING_IN') return;
+    const timer = window.setTimeout(() => {
+      if (!isMountedRef.current) return;
+      const warmup = getWarmupStatus();
+      if (warmup.status === 'error') {
+        setTransitionError(warmup.errorMessage || 'Unable to load game modules.');
+        setTransitionPhase('ERROR');
+        return;
+      }
+      if (mode === 'ERROR') {
+        setTransitionError(errorMessage || 'Failed to initialize 3D graphics rendering engine.');
+        setTransitionPhase('ERROR');
+        return;
+      }
+      if (isInitializing || warmup.status === 'warming' || !engineRef.current) {
+        setTransitionPhase('WAKING');
+        return;
+      }
+
+      hideAndInertLoader(loaderHostRef.current, loaderFrameRef.current);
+      setLoaderInert(true);
+      handleStartGame(!hasExistingSave);
+      setTransitionPhase('REVEALING');
+    }, GAME_ROOT_FADE_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [transitionPhase, mode, errorMessage, isInitializing, hasExistingSave, handleStartGame]);
+
+  // While in WAKING ("Waking the drift..."), finish transition as soon as engine/modules become ready
+  useEffect(() => {
+    if (transitionPhase !== 'WAKING') return;
+    const warmup = getWarmupStatus();
+    if (warmup.status === 'error') {
+      setTransitionError(warmup.errorMessage || 'Unable to load game modules.');
+      setTransitionPhase('ERROR');
+      return;
     }
-    if (customRegionId && customRegionId !== activeSave.regionId) {
-      engineRef.current?.switchDestination(customRegionId);
+    if (mode === 'ERROR') {
+      setTransitionError(errorMessage || 'Failed to initialize 3D graphics rendering engine.');
+      setTransitionPhase('ERROR');
+      return;
     }
-    setMode('PLAYING');
-    engineRef.current?.setMode('PLAYING');
-  };
+    if (!isInitializing && warmup.status === 'ready' && engineRef.current) {
+      hideAndInertLoader(loaderHostRef.current, loaderFrameRef.current);
+      setLoaderInert(true);
+      handleStartGame(!hasExistingSave);
+      setTransitionPhase('REVEALING');
+    }
+  }, [transitionPhase, isInitializing, mode, errorMessage, hasExistingSave, handleStartGame]);
+
+  // Dissolve the sky veil smoothly once the live 3D scene has started
+  useEffect(() => {
+    if (transitionPhase !== 'REVEALING') return;
+    const timer = window.setTimeout(() => {
+      if (isMountedRef.current) {
+        setTransitionPhase('ACTIVE');
+      }
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [transitionPhase]);
+
+  const handleRetryTransition = useCallback(() => {
+    setTransitionError(null);
+    setTransitionPhase('WAKING');
+    warmGameModules(true).then((res) => {
+      if (!isMountedRef.current) return;
+      if (res.status === 'error') {
+        setTransitionError(res.errorMessage || 'Unable to load game modules.');
+        setTransitionPhase('ERROR');
+        return;
+      }
+      if (containerRef.current && !initLockRef.current && !engineRef.current) {
+        initEngine(containerRef.current);
+      }
+    });
+  }, [initEngine]);
 
   const handleSelectSaveSlot = (slotId: number) => {
     setActiveSlotId(slotId);
@@ -375,11 +494,9 @@ export default function App() {
   };
 
   const handleReturnToTitle = () => {
-    engineRef.current?.persistSave();
-    setMode('TITLE');
-    engineRef.current?.setMode('TITLE');
-    setHasExistingSave(StorageService.hasSave(activeSlotId));
-    setActiveDialogue(null);
+    reloadToLoadingScreen(() => {
+      engineRef.current?.persistSave();
+    });
   };
 
   const handleSaveProgress = () => {
@@ -506,33 +623,105 @@ export default function App() {
     engineRef.current?.useItem(itemId);
   };
 
+  const handleLoaderNodesReady = useCallback(
+    (host: HTMLDivElement | null, frame: HTMLIFrameElement | null) => {
+      loaderHostRef.current = host;
+      loaderFrameRef.current = frame;
+    },
+    []
+  );
+
+  const showLoader =
+    !loaderInert &&
+    (isInitializing ||
+      mode === 'TITLE' ||
+      transitionPhase === 'FADING_IN' ||
+      (mode === 'SETTINGS' && engineRef.current?.getMode() === 'TITLE'));
+
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-[#0a0f16] font-sans select-none text-slate-100">
-      {/* Isolated WebGL Canvas */}
-      <GameCanvas engineRef={engineRef} onContainerReady={initEngine} />
-
-      {/* Global In-Game Notification Toasts */}
-      <NotificationToast />
-
       {/* Custom floating-island loading and title screen */}
-      {(isInitializing ||
-        mode === 'TITLE' ||
-        (mode === 'SETTINGS' && engineRef.current?.getMode() === 'TITLE')) && (
+      {showLoader && mode !== 'ERROR' && (
         <LoadingScreen
           initPhase={initPhase}
           progressPercent={initProgress}
-          ready={!isInitializing && mode !== 'ERROR'}
+          ready={!isInitializing}
           hasExistingSave={hasExistingSave}
           soundEnabled={settings.soundEnabled}
-          onBegin={() => handleStartGame(!hasExistingSave)}
+          hiddenAndInert={loaderInert}
+          onBegin={handleBeginFromLoader}
           onOpenSettings={() => setMode('SETTINGS')}
           onOpenSaveSlots={() => setIsSaveSlotsOpen(true)}
           onToggleSound={handleToggleSound}
+          onLoaderNodesReady={handleLoaderNodesReady}
           onRetry={() => {
             if (containerRef.current) initEngine(containerRef.current);
           }}
         />
       )}
+
+      {/* Full-viewport #game-root container above the loader */}
+      <div
+        id="game-root"
+        className={
+          transitionPhase !== 'IDLE' && transitionPhase !== 'ACTIVE'
+            ? 'fixed inset-0 z-[60] w-full h-full overflow-hidden'
+            : 'relative w-full h-full overflow-hidden'
+        }
+      >
+        {/* Isolated WebGL Canvas */}
+        <GameCanvas engineRef={engineRef} onContainerReady={initEngine} />
+
+        {/* Global In-Game Notification Toasts */}
+        <NotificationToast />
+
+        {/* Sky-colour (#1b3a6b) 900ms fade-in curtain + Waking the drift / error fallback */}
+        {transitionPhase !== 'IDLE' && transitionPhase !== 'ACTIVE' && (
+          <div
+            role={transitionPhase === 'ERROR' ? 'alert' : 'status'}
+            aria-live="polite"
+            style={{
+              backgroundColor: LOADER_SKY_COLOR,
+              opacity:
+                transitionPhase === 'REVEALING'
+                  ? 0
+                  : transitionPhase === 'FADING_IN' && !curtainOpaque
+                  ? 0
+                  : 1,
+              transitionDuration: transitionPhase === 'REVEALING' ? '450ms' : `${GAME_ROOT_FADE_MS}ms`,
+              pointerEvents: transitionPhase === 'REVEALING' ? 'none' : 'auto',
+            }}
+            className="fixed inset-0 z-[65] flex items-center justify-center p-6 transition-opacity ease-out"
+          >
+            {transitionPhase === 'WAKING' && (
+              <div className="max-w-sm w-full rounded-2xl border border-[#f3ecd8]/25 bg-[#1d2326]/90 px-6 py-5 text-center shadow-2xl">
+                <div className="text-xs uppercase tracking-[0.22em] text-[#f6c978] font-serif font-bold mb-2">
+                  The Drifting Land
+                </div>
+                <p className="text-base font-serif text-[#f3ecd8] tracking-wide">
+                  Waking the drift…
+                </p>
+              </div>
+            )}
+
+            {transitionPhase === 'ERROR' && (
+              <div className="max-w-md w-full rounded-2xl border border-red-400/40 bg-[#1d2326]/95 p-6 text-center shadow-2xl">
+                <h2 className="text-base font-serif font-bold uppercase tracking-widest text-[#f6c978] mb-2">
+                  Unable to Start Journey
+                </h2>
+                <p className="text-xs font-mono text-[#f3ecd8]/90 mb-5 leading-relaxed">
+                  {transitionError || 'Failed to load game modules. Check your connection and retry.'}
+                </p>
+                <button
+                  onClick={handleRetryTransition}
+                  className="px-6 py-2.5 rounded-xl bg-gradient-to-b from-[#8a8e8e] to-[#565b5d] border-2 border-[#2f3537] text-[#f3ecd8] font-serif font-bold text-xs uppercase tracking-widest cursor-pointer hover:brightness-110"
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
       {/* Screen: Playing HUD */}
       {!isInitializing &&
@@ -809,6 +998,7 @@ export default function App() {
           onReloadPage={() => window.location.reload()}
         />
       )}
+      </div>
     </div>
   );
 }
