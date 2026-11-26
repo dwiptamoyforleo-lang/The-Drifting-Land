@@ -27,7 +27,6 @@ import { StorageService, createInitialSave } from './services/storage';
 import { GameEngine } from './engine/gameLoop';
 import { WebGLInitError } from './engine/renderer';
 import { GameCanvas } from './components/GameCanvas';
-import { TitleScreen } from './components/TitleScreen';
 import { HUD } from './components/HUD';
 import { PauseMenu } from './components/PauseMenu';
 import { SettingsModal } from './components/SettingsModal';
@@ -515,32 +514,23 @@ export default function App() {
       {/* Global In-Game Notification Toasts */}
       <NotificationToast />
 
-      {/* Authentic Loading Screen with genuine step progress */}
-      {isInitializing && (
+      {/* Custom floating-island loading and title screen */}
+      {(isInitializing ||
+        mode === 'TITLE' ||
+        (mode === 'SETTINGS' && engineRef.current?.getMode() === 'TITLE')) && (
         <LoadingScreen
-          regionId={activeSave.regionId}
           initPhase={initPhase}
           progressPercent={initProgress}
-          trackedQuest={trackedQuest}
-          errorMessage={errorMessage}
-          onRetry={() => {
-            if (containerRef.current) {
-              initEngine(containerRef.current);
-            }
-          }}
-        />
-      )}
-
-      {/* Screen: Title Screen / Main Menu */}
-      {!isInitializing && mode === 'TITLE' && (
-        <TitleScreen
+          ready={!isInitializing && mode !== 'ERROR'}
           hasExistingSave={hasExistingSave}
-          activeSave={activeSave}
-          onStartGame={handleStartGame}
+          soundEnabled={settings.soundEnabled}
+          onBegin={() => handleStartGame(!hasExistingSave)}
           onOpenSettings={() => setMode('SETTINGS')}
           onOpenSaveSlots={() => setIsSaveSlotsOpen(true)}
-          soundEnabled={settings.soundEnabled}
           onToggleSound={handleToggleSound}
+          onRetry={() => {
+            if (containerRef.current) initEngine(containerRef.current);
+          }}
         />
       )}
 
